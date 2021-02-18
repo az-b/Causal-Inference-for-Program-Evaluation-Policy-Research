@@ -1,0 +1,380 @@
+---
+title: "B0yarskayaM_Q2"
+author: "Margar1ta B0yarskaya"
+output: pdf_document
+---
+```{r echo=FALSE, message=FALSE}
+set.seed(1234)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(truncnorm)
+library(ggdag)
+library(glogis)
+library(AER)
+```
+## QUESTION 2: IVs
+
+##### SECTION 1: MOTIVATING SCENARIO
+Description of a hypothetical real-life scenario that maps to the variables described (e.g. see some of the examples from your homework assignments). (about 2 paragraphs)
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@      
+We will generate data from a hypothetical randomized encouragment design.  
+In my hypothetical study, a researcher is interested in knowing the effect of going on a (US-operated) Birthright Israel trip on average monthly contributions to Jewish charities measured for the duration of the 4th year after the conclusion of the trip.    
+ 
+Birthright Israel program offers a fully sponsored 2-week group trip to Israel to eligible non-Israeli US citizens. For the purposes of our experiment, we will assume that the eligibility criteria require that participants be of ages 17--26 and posess proof of Jewish ancestry.
+
+Contact emails of 1000 individuals within eligible age are available through a local university Jewish Cultural Center. The researcher randomly assigns these individuals to one of two conditions. One group is encouraged via an email from the JCC to participate in Birthright Israel in the coming summer, while the other group receives no special encouragement. They would have had to discover the existence of the Birthright program on their own.    
+
+The outcome variable is a continuous measure of average monthly contributions to Jewish charities made by the individual (self-reported, assume perfect reporting). We measure contributions every month for 12 months beginning 3 years after the Birthright trip was concluded. The average measure is reported in hundreds of dollars.
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@    
+
+##### SECTION 2: DGP DESCRIPTION
+Description of the data generating process. 
+Write out the formal models.
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@    
+*Z* := (the instrument) receiving an encouragement e-mail.    
+*D* := (the treatment) goiing on a Birthright Israel trip in the summer of the experiment year.   
+*Y* := (the outcome) monthly average cumulative payments to any Jewish charities in the 4th year after the Birthright trip took place in the experimental year.    
+
+World A:    
+(i) 25% compliers, 60% never takers, and 15% always takers. No defyers.    
+(ii) The ATE for the compliers is 4.   
+(iii) The average Y(Z=0) for never takers is 0. The average Y(0) for compliers is 3. The average Y(Z=0) for always takers is 6.   
+(iv) The residual standard deviation is 1 for everyone in the sample (generated independently for each potential outcome).   
+
+World B:      
+(i) 25% compliers, 60% never takers, and 15% always takers. No defyers.   
+(ii) The ATE for the compliers is 4. The ATE for the always takers is 2. The ATE for the never takers is 0    
+(*Exclusion restriction violation*).
+(iii) The average Y(Z=0) for never takers is 0. The average Y(0) for compliers is 3. The average Y(Z=0) for always takers is 6.   
+(iv)The residual standard deviation is 1 for everyone in the sample.   
+
+World C:   
+(i) 20% compliers, 60% never takers, 15% always taker, and 5% defyers (*monotonicity violation*). 
+(ii) The ATE for the compliers is 4.   
+(iii) The average Y(Z=0) for never takers is 0. The average Y(0) for compliers is 3. The average Y(Z=0) for always takers is 6. The average Y(Z=0) for the defyers is 0.   
+(iv)The residual standard deviation is 1 for everyone in the sample.     
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+##### SECTION 3: ASSUMPTIONS
+Discuss the assumptions required for the method to yield a valid causal estimate for the estimand. 
+
+@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@  
+The key assumptions required to obtain an unbiased estimate are:  
+
+1) Ignorability of Z. In our context, this would mean that the e-mail addressees are randomly assigned into encouragement (receiving an e-mail about Birthright) and no ecnouragement groups.  
+- This is a weak, plausible assumption. We designed the experiments for it to hold.   
+
+2) Exclusion restriction (Z affects Y only via D). This would mean that receiving the email does not directly   influence the outcome (charitable giving). In particular, the groups whose compliance is insensitive to the instrumental encourgament (never takers, always takers) should get the same results given that they *did* receive an email as they would have obtained *had they not* recieved the email.   
+- This is a reasonable assumption for our motivational example. Receiving the encouragement should not in intself influence the charity outcome other than by way of attending Birthright. Although in reality, one can never be too cautious when asserting absence of paths between variables.   
+We designed our Worlds A and C to satisfy this assumption. World B violates it.   
+
+3) Monotonicity (no defiers). This means that we deny the possibility of the following student profile: individuals who partake in Birthright camp if they *do not* recevive the email, and avoid the program if they are invited to partake.
+- Perhaps this is not a very controversial assumption in a hypothetical case similar to the one we study. The asusmption is likely to hold. If it doesn't hold, perhaps we can expect there to be very few defiers, but our estimates as computed above would suffer from bias.   
+We designed our Worlds A and B to satisfy this assumption. World C violates it.   
+
+4) Non-zero correlation between instrument and treatment. We assume the impossibility of a situation where emails do not affect anyone's decision to take or not take the Birthright trip.   
+- I think it is a plausible assumption, although in reality the effect would probably be small, and I would expect an instrument like this to be weak.    
+
+5) SUTVA. No influence between individual student decisions to take or not take the Birthright trip.    
+- This is a strong assumption. First of all, simply being informed about the fact that a friend (fellow JCC subscriber?) plans to go on Birthright amounts for some students to *finding out about Birthright*, and for some of those students this will be enough of an encouragement to *take the trip* (i.e., an additional social incentive, whereas a simple e-mail on its own perhaps would not have been enough of an encouragement).   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+
+
+@@@@@@@@@@@@@@@@ N.B.: @@@@@@@@@@@@@@@@@@  
+I will reorder my asnwers to Sections 4 and 5: in my code, the DGP should come before the implementation of the methods.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+##### SECTION 5: DGP CODE
+Provide the R code used to generate the data.
+
+```{r}
+#WORLD A:
+set.seed(1234)
+pop_sz = 1000
+
+#compliance types:
+C <- c(rep('C', 0.25*pop_sz), rep('NT', 0.6*pop_sz), rep('AT', 0.15*pop_sz))
+C <- sample(C)
+
+#assignment into encouragement groups:
+Z  <- rbinom(pop_sz, 1, 0.5) 
+
+datA.full <- data.frame(C, Z) 
+
+
+# Would have gone on Birthright program had they received the encouragement? Aka D(Z=1):
+datA.full['D_Z1'] <- (datA.full$C=="C")*1 + (datA.full$C=="AT")*1
+# Would have gone on Birthright program had they NOT received the encouragement? Aka D(Z=0):
+datA.full['D_Z0'] <- (datA.full$C=="C")*0 + (datA.full$C=="AT")*1
+
+head(datA.full)
+
+avg_y0_nt <- 0
+avg_y0_c <- 3
+avg_y0_at <- 6
+
+avg_y1_c <- avg_y0_c + 4
+
+datA.full['Y_0']<-NA
+datA.full['Y_1']<-NA
+datA.full[datA.full$C == "NT",]$Y_0 <- rnorm(0.6*pop_sz, mean = avg_y0_nt, sd = 1)
+datA.full[datA.full$C == "C",]$Y_0 <- rnorm(0.25*pop_sz, mean = avg_y0_c, sd = 1)
+datA.full[datA.full$C == "AT",]$Y_0 <- rnorm(0.15*pop_sz, mean = avg_y0_at, sd = 1)
+datA.full[datA.full$C == "NT",]$Y_1 <- rnorm(0.6*pop_sz, mean = avg_y0_nt, sd = 1)
+datA.full[datA.full$C == "C",]$Y_1 <- rnorm(0.25*pop_sz, mean = avg_y1_c, sd = 1)
+datA.full[datA.full$C == "AT",]$Y_1 <- rnorm(0.15*pop_sz, mean = avg_y0_at, sd = 1)
+
+
+
+head(datA.full)
+
+#check that the criteria are satisfied:
+ET_i_A <- datA.full['Y_1']-datA.full['Y_0']
+SATE_compliers_A <- mean(ET_i_A[datA.full$C=='C',1])
+print("ATE on compliers:")
+print(SATE_compliers_A)
+
+print("Average Y_0 for different compliance groups:")
+mean(datA.full$Y_0[datA.full$C=='NT'])
+mean(datA.full$Y_0[datA.full$C=='C'])
+mean(datA.full$Y_0[datA.full$C=='AT'])
+#OK
+```
+
+```{r} 
+# WORLD B:
+
+#compliance types:
+C <- c(rep('C', 0.25*pop_sz), rep('NT', 0.6*pop_sz), rep('AT', 0.15*pop_sz))
+C <- sample(C)
+
+#assignment into encouragement groups:
+Z  <- rbinom(pop_sz, 1, 0.5) 
+
+datB.full <- data.frame(C, Z) 
+
+# Would have gone on Birthright program had they received the encouragement? Aka D(Z=1):
+datB.full['D_Z1'] <- (datB.full$C=="C")*1 + (datB.full$C=="AT")*1
+# Would have gone on Birthright program had they NOT received the encouragement? Aka D(Z=0):
+datB.full['D_Z0'] <- (datB.full$C=="C")*0 + (datB.full$C=="AT")*1
+
+head(datB.full)
+
+avg_y0_nt <- 0
+avg_y0_c <- 3
+avg_y0_at <- 6
+
+avg_y1_c <- avg_y0_c + 4
+avg_y1_at <- avg_y0_at + 2
+avg_y1_nt <- avg_y0_nt + 0
+
+datB.full['Y_0']<-NA
+datB.full['Y_1']<-NA
+datB.full[datB.full$C == "NT",]$Y_0 <- rnorm(0.6*pop_sz, mean = avg_y0_nt, sd = 1)
+datB.full[datB.full$C == "C",]$Y_0 <- rnorm(0.25*pop_sz, mean = avg_y0_c, sd = 1)
+datB.full[datB.full$C == "AT",]$Y_0 <- rnorm(0.15*pop_sz, mean = avg_y0_at, sd = 1)
+datB.full[datB.full$C == "NT",]$Y_1 <- rnorm(0.6*pop_sz, mean = avg_y1_nt, sd = 1)
+datB.full[datB.full$C == "C",]$Y_1 <- rnorm(0.25*pop_sz, mean = avg_y1_c, sd = 1)
+datB.full[datB.full$C == "AT",]$Y_1 <- rnorm(0.15*pop_sz, mean = avg_y1_at, sd = 1)
+
+head(datB.full)
+
+#check that the criteria are satisfied:
+ET_i_B <- datB.full['Y_1']-datB.full['Y_0']
+SATE_compliers_B <- mean(ET_i_B[datB.full$C=='C',1])
+SATE_always_takers_B <- mean(ET_i_B[datB.full$C=='AT',1])
+print("SATE on compliers:")
+print(SATE_compliers_B)
+print("SATE on always takers:")
+print(SATE_always_takers_B)
+
+print("Average Y_0 for different compliance groups:")
+mean(datB.full$Y_0[datB.full$C=='NT'])
+mean(datB.full$Y_0[datB.full$C=='C'])
+mean(datB.full$Y_0[datB.full$C=='AT'])
+#all looks OK.
+```
+
+```{r}
+#WORLD C:
+set.seed(1234)
+pop_sz = 1000
+
+#compliance types:
+C <- c(rep('C', 0.2*pop_sz), rep('NT', 0.6*pop_sz), rep('AT', 0.15*pop_sz), rep('D', 0.05*pop_sz))
+C <- sample(C)
+
+#assignment into encouragement groups:
+Z  <- rbinom(pop_sz, 1, 0.5) 
+
+datC.full <- data.frame(C, Z) 
+
+# Would have gone on Birthright program had they received the encouragement? Aka D(Z=1):
+datC.full['D_Z1'] <- (datC.full$C=="C")*1 + (datC.full$C=="AT")*1 + 
+  (datC.full$C=="D")*0 + (datC.full$C=="NT")*0
+# Would have gone on Birthright program had they NOT received the encouragement? Aka D(Z=0):
+datC.full['D_Z0'] <- (datC.full$C=="C")*0 + (datC.full$C=="AT")*1 + 
+  (datC.full$C=="D")*1 + (datC.full$C=="NT")*0
+
+head(datC.full)
+
+avg_y0_nt <- 0
+avg_y0_c <- 3
+avg_y0_at <- 6
+avg_y0_d <- 0
+
+avg_y1_c <- avg_y0_c + 4
+
+datC.full['Y_0']<-NA
+datC.full['Y_1']<-NA
+datC.full[datC.full$C == "NT",]$Y_0 <- rnorm(0.6*pop_sz, mean = avg_y0_nt, sd = 1)
+datC.full[datC.full$C == "C",]$Y_0 <- rnorm(0.2*pop_sz, mean = avg_y0_c, sd = 1)
+datC.full[datC.full$C == "AT",]$Y_0 <- rnorm(0.15*pop_sz, mean = avg_y0_at, sd = 1)
+datC.full[datC.full$C == "D",]$Y_0 <- rnorm(0.05*pop_sz, mean = avg_y0_d, sd = 1)
+datC.full[datC.full$C == "NT",]$Y_1 <- rnorm(0.6*pop_sz, mean = avg_y0_nt, sd = 1)
+datC.full[datC.full$C == "C",]$Y_1 <- rnorm(0.2*pop_sz, mean = avg_y1_c, sd = 1)
+datC.full[datC.full$C == "AT",]$Y_1 <- rnorm(0.15*pop_sz, mean = avg_y0_at, sd = 1)
+datC.full[datC.full$C == "D",]$Y_1 <- rnorm(0.05*pop_sz, mean = avg_y0_d, sd = 1)
+
+
+
+head(datC.full)
+
+#check that the criteria are satisfied:
+ET_i_C <- datC.full['Y_1']-datC.full['Y_0']
+SATE_compliers_C <- mean(ET_i_C[datC.full$C=='C',1])
+print("SATE on compliers:")
+print(SATE_compliers_C)
+
+print("Average Y_0 for different compliance groups:")
+mean(datC.full$Y_0[datC.full$C=='NT'])
+mean(datC.full$Y_0[datC.full$C=='C'])
+mean(datC.full$Y_0[datC.full$C=='AT'])
+#OK
+```
+
+Calculating the SATE (average effect of Z on Y) for each of the compliance groups:
+```{r}
+print("SATE for compliers:")
+print(SATE_compliers_A)
+
+print("SATE for always takers:")
+print(mean(ET_i_A[datA.full$C=='AT',1]))
+      
+print("SATE for never takers:")
+print(mean(ET_i_A[datA.full$C=='NT',1]))
+
+# looks OK. 
+```
+
+##### SECTION 4: METHODS AND ESTIMANDS
+a) Provide a description of the method(s) used and the estimand.  (3-4 paragraphs) 
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+The estimand of interest is CACE -- Complier Average Causal Effect. In estimating CACE, we only make inferences for the complier group. 
+
+I will use a 2SLS estimator:     
+- first, regress the treatment on the instrument   
+- then, predict D_hat from the fit obtained from the first stage regression   
+- Finally, regress the outcome on D_hat to obtain the coefficient of interest.   
+
+In effect, we are detecting how much of the variation in the outcome is attributable to an exogenous source of variation. This is most useful also when dealing with a confounder between treatment and outcome: where ordinary OLS estimation results in biased results, a 2SLS IV (or a Wald estimator) will be unbiased, given that the necessary IV assumptions hold. Using an IV amounts to 'projecting' the variation in the outcome onto a subspace which is orthogonal to the confounder.
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+b) Provide the code used to estimate the results.
+
+```{r}
+#creating the eobservational datasets:
+
+datA.obs <- data.frame(Z=datA.full$Z)
+datA.obs['D'] <- datA.full$D_Z0*(1-datA.full$Z) + datA.full$D_Z1*datA.full$Z
+datA.obs['Y'] <- datA.full['Y_0']*(1-datA.full['Z']) + datA.full['Y_1']*datA.full['Z']
+#head(datA.obs)
+
+datB.obs <- data.frame(Z=datB.full$Z)
+datB.obs['D'] <- datB.full$D_Z0*(1-datB.full$Z) + datB.full$D_Z1*datB.full$Z
+datB.obs['Y'] <- datB.full['Y_0']*(1-datB.full['Z']) + datB.full['Y_1']*datB.full['Z']
+#head(datB.obs)
+
+datC.obs <- data.frame(Z=datC.full$Z)
+datC.obs['D'] <- datC.full$D_Z0*(1-datC.full$Z) + datC.full$D_Z1*datC.full$Z
+datC.obs['Y'] <- datC.full['Y_0']*(1-datC.full['Z']) + datC.full['Y_1']*datC.full['Z']
+#head(datC.obs)
+```
+
+```{r}
+# CACE via 2SLS, World A:
+first_stage_A <- lm(D~Z, data = datA.obs)
+D_hat_A <- predict(first_stage_A)
+second_stage_A <- lm(datA.obs$Y~D_hat_A)
+tsls_A <- c(summary(second_stage_A)$coefficients[2,1], summary(second_stage_A)$coefficients[2,2])
+
+# CACE via 2SLS, World B:
+first_stage_B <- lm(D~Z, data = datB.obs)
+D_hat_B <- predict(first_stage_B)
+second_stage_B <- lm(datB.obs$Y~D_hat_B)
+tsls_B <- c(summary(second_stage_B)$coefficients[2,1], summary(second_stage_B)$coefficients[2,2])
+
+# CACE via 2SLS, World C:
+first_stage_C <- lm(D~Z, data = datC.obs)
+D_hat_C <- predict(first_stage_C)
+second_stage_C <- lm(datC.obs$Y~D_hat_C)
+tsls_C <- c(summary(second_stage_C)$coefficients[2,1], summary(second_stage_C)$coefficients[2,2])
+```
+
+##### SECTION 6: RESULTS
+Provide results (estimate and s.e. or confidence interval) for each method and world in an attractive display (table or figure). Briefly discuss and provide a causal interpretation for one estimate. (a few paragraphs)   
+
+```{r echo=FALSE, message=FALSE}
+together <- rbind(tsls_A, tsls_B, tsls_C)
+colnames(together) <- c("effect estimate", "ste")
+together
+```
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Causal interpretation of the CACE estimate in World A:   
+
+The charitable spending increase due to going on Birthright Israel trip in the year fo the experiment is close to 4 for university JCC mailing list subscribers who *will* go on Birthright when receiving the encouragement email and *will not* go otherwise (compared to had they not gone on Birthright.)   
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@    
+
+
+##### SECTION 7: BIAS ANALYSIS
+Discuss the bias of each method and tie that to what you did to violate the
+assumptions in each world. (about 2 paragraphs)
+
+```{r}
+bias_A <- SATE_compliers_A-tsls_A
+bias_B <- SATE_compliers_B-tsls_B
+bias_C <- SATE_compliers_C-tsls_C
+bias_A[1]
+bias_B[1]
+bias_C[1]
+```
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+In the World A, where all assumptions are satisfied, we obtained an estimate with negligibly small bias.      
+
+In World B, the DGP was constructed to violate the Exclusion Restriction assumption. Let us examine the intention-to-treat formula: ITT = CACE x P(type = C) + ATE_AT x P(type = AT),   
+where ATE_AT in our case was set to 2. We should expect the estimate to be show a bias of around 1.2. In our case the bias of the estimate obtained for World B is slightly larger.    
+
+In World C, the DGP was constructed to violate the Monotonicity assumption. Relatively small bias of the estimate obtained for this world is due to a small proportion of defyers.   
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+##### SECTION 8: CONCLUSION
+Conclude with an overview of the lessons you have learned from your
+simulations. (about 2-3 paragraphs)
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Instrumental variables permit using an exogenous source of variation to estimate the causal effect of the treatment on the outcome in absence of a true randomized design. In an encouragement design similar to the one we studied, we are able to make inferences for the *compliers* group via CACE.  
+
+IV estimators should yield unbiased estimates if all assumptions hold. We have seen fro our experiments in World C that the bias resulting from a violation of monotonicity may turn out to be small if the relative proportion of defyers is small.    
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   

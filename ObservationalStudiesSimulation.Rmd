@@ -1,0 +1,623 @@
+---
+title: "Observational Studies Simulation"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output: pdf_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library('ggdag')
+library('dplyr')
+library('glogis')
+library('Rlab')
+library('dplyr')
+library(reshape2)
+library(ggplot2)
+```
+## Objective 
+
+The goal of this exercise is to learn how to simulate a few different types of observational causal structures and evaluate the properties of different approaches to estimating the treatment effect through linear regression. 
+
+## Problem Statement
+
+You should be familiar with the assumptions of linear regression (both **structural** and **parametric**) for causal effect estimation. Suppose we want to simulate a simple causal data set from the joint distribution of the covariates, treatment, and potential outcomes.
+
+The data generating process (DGP) is:p(X, Z, Y0,Y1)=p(X)p(Z|X)p(Y1,Y0|Z, X). (As per usual, X is the pretest variable, Z is the treatment variable and Y0 and Y1 are the potential outcomes.)
+
+## Part A: Linear Parametric form
+
+#### Question 1: Simulate the data
+
+(a) Start with the marginal distribution of X. Simulate as X~N(0,1) with sample size of 1000. Set the seed to be 1234.
+
+```{r}
+set.seed(1234)
+X <- rnorm(n=1000, mean = 0, sd = 1)
+```
+
+(b) Look at the DGP. What role does X play?
+```{r warning=FALSE, fig.width=1, fig.height=1}
+# X is a confounder: it affects both the treatment assignment Z and the outcome Y.
+# The DAG is somehting like this (omitting noise nodes):
+dag <- dagify(Z ~ X,
+              Y ~ X + Z,
+              exposure = "Z",
+              outcome = "Y")
+dag %>% ggplot(aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_point() +
+    geom_dag_edges() +
+    geom_dag_text() +
+    theme_dag()
+```
+
+(c) The distribution of binary Z depends on the value of X. Therefore, the next step is to simulate Z from p(Z|X) = Binomial(p), where the vector of probabilities, p, can vary across observations.  Come up with a strategy for generating the vector Z conditional on X that forces you to be explicit about how these probabilities are conditional on X (an inverse logit function would be one strategy but there are others). Make sure that X is significantly associated with Z and that the vector of probabilities used to draw Z doesn't vary below .05 or above .95. 
+
+```{r}
+quantiles = X + rnorm(1000, mean = 0, sd = 2) 
+#hist(X)
+#hist(quantiles)
+p <- pglogis(quantiles, location=mean(X)+4, scale=1,log = FALSE) 
+p <- (0.95-0.05)*(p-min(p))/(max(p)-min(p))+0.05 #set the values to fall within [0.05;0.95] range
+plot(quantiles, p, xlab="quantiles = X+noise")
+#verify the bounds:
+print(sprintf("min(p) = %.2f", min(p)))
+print(sprintf("max(p) = %.2f", max(p)))
+
+Z <- rbern(1000, p)
+
+df <- data.frame(X=X, q=quantiles, p=p, Z=Z)
+head(df)
+
+#let's make sure the association is significant:
+ols <- lm(formula = Z~X, data = df)
+summary(ols)
+pval <- summary(ols)$coefficients[2,4]
+print(sprintf("significance of \beta_X is %f", pval))
+ifelse(pval<0.05, print("The coefficient is significant."), print("Insignificant :("))
+     
+# so, the probability is increasing in X, but X is normal. Moreover, I did "location = mean(X) + SHIFT" 
+# to spice things up: now if X is below 4, the odds of getting Y=1 are against you. Only X>4 get to 
+# flip a coin with p>0.5. So I expect fewer Z=1.
+hist(Z)
+#yes indeed.
+
+```
+
+(d) The last step is to simulate Y from p(Y0,Y1|Z,X).  Come up with a strategy for simulating each potential outcome with appropriate conditioning on Z and X with the following stipulations. 
++ (i) Make sure that E[Y(1)|X] - E[Y(0)|X] = 5.  
++ (ii) Make sure that X has a linear and statistically significant relationship with the outcome. 
++ (iii) Finally, set your error term to have a standard deviation of 1 and allow the residual standard error to be different for the same person across potential outcomes.
++ (iv) Create a data frame containing X,Y,Y0,Y1 and Z.
+```{r}
+df['Y_0'] <- 10 + 1.1 * df$X +       rnorm(n = 1000, mean = 0, sd = 1)
+df['Y_1'] <- 10 + 1.1 * df$X + 5   + rnorm(n = 1000, mean = 0, sd = 1)
+
+df['Y'] <- df['Y_0']*(1-df['Z']) + df['Y_1']*df['Z']
+
+#let's make sure the association is significant:
+ols <- lm(formula = Y~X, data = df)
+summary(ols)
+pval <- summary(ols)$coefficients[2,4]
+print(sprintf("P-value of \beta_X is %f", pval))
+ifelse(pval<0.05, print("The coefficient is significant."), print("Insignificant :("))
+
+head(df)
+```
+
+(e) Turn all of the above steps into a function.
+```{r}
+gen_data <- function(pop_sz, seed = 1234){
+  set.seed(seed)
+  X <- rnorm(n=pop_sz, mean = 0, sd = 1)
+  
+  quantiles = X + rnorm(pop_sz, mean = 0, sd = 2) 
+  p <- pglogis(quantiles, location=mean(X)+4, scale=1,log = FALSE) 
+  p <- (0.95-0.05)*(p-min(p))/(max(p)-min(p))+0.05 #set the values to fall within [0.05;0.95] range
+  plot(quantiles, p, xlab="quantiles = X+noise")
+
+  Z <- rbern(pop_sz, p)
+  
+  df <- data.frame(X=X, q=quantiles, p=p, Z=Z)
+  #head(df)
+  
+  #let's make sure the association is significant:
+  ols <- lm(formula = Z~X, data = df)
+  #summary(ols)
+  pval <- summary(ols)$coefficients[2,4]
+  #print(sprintf("significance of \beta_X is %f", pval))
+  ifelse(pval<0.05, print("The coefficient on X in Z is significant."), print("Insignificant relationship:("))
+
+  df['Y_0'] <- 10 + 1.1 * df$X +       rnorm(n = pop_sz, mean = 0, sd = 1)
+  df['Y_1'] <- 10 + 1.1 * df$X + 5   + rnorm(n = pop_sz, mean = 0, sd = 1)
+  
+  df['Y'] <- df['Y_0']*(1-df['Z']) + df['Y_1']*df['Z']
+  
+  #let's make sure the association is significant:
+  ols <- lm(formula = Y~X, data = df)
+  #summary(ols)
+  pval <- summary(ols)$coefficients[2,4]
+  #print(sprintf("P-value of \beta_X is %f", pval))
+  ifelse(pval<0.05, print("The coefficient on X in Y is significant."), print("Insignificant :("))
+  
+  return(df)
+}
+```
+
+(f) Set your seed to 1234 and generate a dataset of size 1000 from this function.  Save it for later.
+```{r}
+df <- gen_data(1000, 1234)
+head(df)
+```
+(g) Think about the difference between the DGP used in this homework and the first DGP from previous homework (completely randomized experiment). How is the difference in the study design encoded?
+```{r}
+# The assignment of treatment is non-random: 
+# see my commentary above for a detailed examination of how X affects Z (including plots)
+```
+(h) Calculate the SATE from (g) (save it for use later).
+```{r}
+ET_i <- df['Y_1']-df['Y_0']
+SATE_true <- mean(ET_i[,1])
+SATE_true
+```
+
+#### Question 2: Playing the role of the researcher
+
+Now switch to the role of the researcher for a moment. Pretend someone handed you a dataset generated as specified above and asked you to estimate a treatment effect -- for this you will use the dataset generated in 1f above.  You will try two approaches: difference in means and regression.
+
+(a) Estimate the treatment effect using a difference in mean outcomes across treatment groups (save it for use later). 
+```{r}
+SATE_difmeans <- mean(df[df$Z==1,]$Y)-mean(df[df$Z==0,]$Y)
+SATE_difmeans
+```
+
+(b) Estimate the treatment effect using a regression of the outcome on the treatment indicator and covariate  (save it for use later). 
+```{r}
+ols <- glm(formula = Y ~ X + Z, data = df)
+reg_effect <- summary(ols)$coefficients[3,1]
+summary(ols)
+print(sprintf("effect size = %s", reg_effect))
+```
+
+(c) Create a scatter plot of X versus the observed outcome with different colors for treatment and control observations (suggested: red for treated and blue for control).  If you were the researcher would you be comfortable using linear regression in this setting?
+```{r}
+ggplot(df, aes(x=X, y=Y, color = Z)) + 
+  geom_point()+
+  geom_smooth(method=lm)
+# As you see, fitting a linear regression to the grouped data would yield a trend line that is largely 
+# determined by a fit to the untreated group (the majority).
+
+# Indeed, contrast that to plotting two separate trend lines:
+df$Z <- factor(df$Z, levels = c(1,0))
+ggplot(df, aes(x=X, y=Y, color = Z)) + 
+  geom_point()+
+  geom_smooth(method=lm)
+# Contrasting grouped and within-group trends is useful for a researcher. 
+# The data does deem to fit the linearity assumption, so looking at the regression coefficients for Z 
+# is not a terrible idea. 
+```
+
+#### Question 3: Exploring the properties of estimators
+Now we're back to the role of god of Statistics.
+
+(a) Create a scatter plot of X versus each potential outcome with different colors for treatment and control observations (suggested: red for Y(1) and blue for Y(0)). Is linear regression a reasonable model to estimate causal effects for the observed data set? Why or why not?  
+```{r}
+# ATTENTION GRADERS!! I am assuming the above was supposed to say 'for potential outcome group' 
+# instead of 'for treatment and control observations'. 
+df2 <- melt(data = df, id.vars = c("X", 'q', 'p', 'Z', 'Y'), measure.vars = c("Y_0", "Y_1"))
+colnames(df2)[4] <- "po_case"
+colnames(df2)[5] <- "po_value"
+colnames(df2)[6] <- "potential_outcome"
+head(df2)
+df2$potential_outcome <- factor(df2$potential_outcome, levels = c("Y_1", "Y_0"))
+ggplot(df2, aes(x=X, y=value, color = potential_outcome)) + 
+  geom_point()+
+  geom_smooth(method=lm)+ylab("Potential outcome value")
+
+# Linear regression seems reasonable if you are God of statistics! Here the variance is reduced, 
+# because seeing all potential utcomes regardless of actual (biased!) treatment assignment made 
+# for two reasonably sized groups. Above, the small size of Z=1 made for a poor fit of Y to it, 
+# where individual outliers would bias the coefficient.
+```
+
+(b) Calculate the difference between SATE and each of the estimates calculated by the researcher in Question 2.
+```{r}
+sprintf("SATE_true - SATE_difmeans = %.2f", SATE_true - SATE_difmeans)
+sprintf("SATE_true - SATE_reg = %.2f", SATE_true - reg_effect)
+```
+
+(c) Think harder about the practical significance of the bias by dividing this estimate by the standard deviation of the observed outcome Y.
+```{r}
+bias <- (SATE_true - SATE_difmeans)/sd(df$Y)
+print(sprintf('bias (difmeans) = %s', bias))
+
+bias <- (SATE_true - reg_effect)/sd(df$Y)
+print(sprintf('bias (reg) = %s', bias))
+# Difference in means is overestimating the effect, while regression underestimates it. 
+# Another observation: because of the relatively small proportion of the treated in my DGP, 
+# the term mean(df[df$Z==1,]$Y) in the difference in means SATE can be more heavily biased 
+# by outliers (compared to a case in which both tretment and control gorups are sizable).
+```
+
+(d) Create a randomization distribution for each estimator. [Hint: The randomization distribution here needs to respect the original DGP. So make sure to generate the random treatment assignment based on the p you created in 1c (that is, repeat what you did in 1c each time you need a draw of a vector of treatment assignments).]  Use these to calculate the standardized bias for each of the **estimators**. That is, for each estimator, calculate its bias  relative to SATE and divide by the sd of the outcome variable. 
+```{r}
+#I'm going to generate 5,000 draws
+randomization_df <- df
+for (i in 1:5000){
+  # Hmm... should I only draw the last step (Z based on fixed p), 
+  # or should I also re-draw wuantiles (and p) each time?
+  #quantiles = X + rnorm(1000, mean = 0, sd = 2) 
+  #p <- pglogis(quantiles, location=mean(X)+4, scale=1,log = FALSE) 
+  #p <- (0.95-0.05)*(p-min(p))/(max(p)-min(p))+0.05
+  #I convinced myself I should not generate p each time.
+  randomization_df[sprintf("Z_%d",i)] <- rbern(1000, randomization_df$p)}
+
+#head(randomization_df)
+```
+
+```{r}
+#I'll need this function:
+sate_two_methods_dist <- function(data){
+  difmeans <- c()
+  regression <- c()
+  for (i in 1:5000){
+    Z_i <- sprintf("Z_%d",i)
+    Y <- data$Y_0*(1-data[Z_i]) + data$Y_1*(data[Z_i])
+    colnames(Y) <- c('Y')
+    # dif means:
+    this_mean <- mean(Y[data[Z_i]==1]) - mean(Y[data[Z_i]==0])
+    difmeans <- c(difmeans, this_mean)
+    # regression:
+    I_hate_R <- data.frame(Y = Y[,1], X = data$X, Z = data[Z_i][,1])
+    head(I_hate_R)
+    ols <- glm(formula = Y ~ X + Z, data = I_hate_R)
+    this_effect <- summary(ols)$coefficients[3,1]
+    regression <- c(regression, this_effect)
+  }
+  r_is_dumb <- list("difmeans" = difmeans, "regression" = regression)
+  return(r_is_dumb)
+}
+```
+
+```{r}
+both <- sate_two_methods_dist(randomization_df)
+difmeans <- both$difmeans
+regression <- both$regression
+```
+
+```{r}
+#Difference in means:
+bias_difmeans <- (SATE_true - mean(difmeans))/sd(df$Y)
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+
+#regression:
+bias_reg <- (SATE_true - mean(regression))/sd(df$Y)
+print(sprintf("Bias, regression: %f", bias_reg))
+
+# Wow, the bias of difference in means increased a lot compared to a single drawing of Z. 
+# While the bias of regression diminished!
+
+#EXTRA: 
+# I'm going to also do variance:
+#difmeans:
+variance_dm <- var(difmeans)
+print(sprintf("Variance, difference in means: %f", variance_dm))
+#reg:
+variance_reg <- var(regression)
+print(sprintf("Variance, regression: %f", variance_reg))
+# as expected, the variance is smaller for regression.
+
+```
+(e)  What assumption is violated by the difference in means estimator?
+```{r}
+# Need the following assumptions:
+# 1 No simultaneity (different from endogeneity)
+# 2 No interference between units
+# 3 Same version of the treatment
+# SUTVA
+# An obvious violation here is the differential treatment administration.
+# People with very high X values are treated more often (have greater odds), 
+# although there are fewer of them. If groups with higher treatment effects are treated more often,
+# the naive estimator will overrepresent those treated units and upwardly bias the ATE. 
+# We could weigh samples by the probability of treatment to eliminate this bias..
+```
+## Part B: Non-Linear Parametric form
+
+Now we'll explore what happens if we fit the wrong model in an observational study.
+
+#### Question 1:  Simulate the data
+
+(a) Create function sim.nlin with the following DGP.
+
++ (i) X should be drawn from a uniform distribution between 0 and 2.
+
++ (ii) Treatment assignment should be drawn from a Binomial distribution with the following properities (make sure you save the p vector for use later).
+
+$$
+\text{E}[Z \mid X] = p = \text{logit}^{-1}(-2+X^2)\\
+Z \sim \text{Binom}(N,p)
+$$
+
++ (iii) The response surface (model for Y(0) and Y(1)) should be drawn from the following distributions:
+
+$$
+Y(0) =  \mathbf{2}X +\mathbf{\epsilon_0}
+$$
+$$
+Y(1) = \mathbf{2}X+\mathbf{3}X^2+\mathbf{\epsilon_1}
+$$
+where both error terms are normally distributed with mean 0 and standard deviation of 1.
+
++ (iv) Make sure the returned dataset has a column for the probability of treatment assignment as well.
+
+```{r}
+sim.nlin <- function(pop_sz, seed = 1234){
+  set.seed(seed)
+  X <- runif(n=pop_sz, min = 0, max = 2)
+  
+  #E[Z | X] = p :=
+  quantiles <- X**2 - 2
+  p <- pglogis(quantiles, log = FALSE) 
+  plot(quantiles, p, xlab="quantiles = X^2 - 2")
+  
+  #Z ~ Binom(N,p)
+  Z <- rbern(pop_sz, p)
+  
+  df <- data.frame(X=X, q=quantiles, p=p, Z=Z)
+  #head(df)
+  
+  df['Y_0'] <- 2 * df$X +                 rnorm(n = pop_sz, mean = 0, sd = 1)
+  df['Y_1'] <- 2 * df$X + 3 * (df$X)**2 + rnorm(n = pop_sz, mean = 0, sd = 1)
+  
+  df['Y'] <- df['Y_0']*(1-df['Z']) + df['Y_1']*df['Z']
+  
+  return(df)
+}
+```
+(b) Simulate a data set called data.nlin with sample size 1000.
+```{r}
+df_nlin <- sim.nlin(1000, 1234)
+head(df_nlin)
+```
+(c) Make the following plots.  
+
++ (i) Create overlaid histograms of the probability of assignment.
+```{r}
+df_nlin$Z <- factor(df_nlin$Z, levels = c(1,0))
+ggplot(df_nlin, aes(x = p, fill = Z)) +    
+  geom_histogram(alpha = 0.5, position = "identity")
+```
++ (ii) Make a scatter plot of X versus the observed outcomes versus X with different colors for each treatment group.
+```{r}
+ggplot(df_nlin, aes(x=X, y=Y, color = Z)) + 
+  geom_point()#+geom_smooth(method=lm)
+```
+
+
++ (iii) Create a scatter plot of X versus each potential outcome with different colors for treatment and control observations (suggested: red for Y(1) and blue for Y(0)).  Does linear regression of Y ond X seem like a good model for this response surface?
+```{r}
+df2 <- melt(data = df_nlin, id.vars = c("X", 'q', 'p', 'Z', 'Y'), measure.vars = c("Y_0", "Y_1"))
+colnames(df2)[4] <- "po_case"
+colnames(df2)[5] <- "po_value"
+colnames(df2)[6] <- "potential_outcome"
+df2$potential_outcome <- factor(df2$potential_outcome, levels = c("Y_1", "Y_0"))
+ggplot(df2, aes(x=X, y=value, color = potential_outcome)) + 
+  geom_point()+
+  geom_smooth(method=lm)+ylab("Potential outcome value")
+# again, better to be the god of statistics, because in the plot above there were regions of X 
+# for which some of our observations only include control group members but no 'comparable' 
+# treatment group member.
+# I.e., the 'overlap' assumption does not hold. 
+
+# Besides, for this DGP, the parametric form of the model is not correct, although the linear 
+# approximation of the true model is not completely unreasonable (in contrast to the example 
+# from class lectures).
+```
+
+
+(d) Create randomization distributions to investigate the properties of each of 3 estimators with respect to SATE: (1) difference in means, (2) linear regression of the outcome on the treatment indicator and X, (3) linear regression of the outcome on the treatment indicator, X, and $X^2$.  
+```{r}
+#I'm going to generate 5,000 draws
+randomization_df_nlin <- df_nlin
+for (i in 1:5000){
+  randomization_df_nlin[sprintf("Z_%d",i)] <- rbern(1000, randomization_df_nlin$p)}
+#head(randomization_df_nlin)
+```
+
+```{r}
+#I'll need this function:
+sate_three_methods_dist <- function(data){
+  difmeans <- c()
+  regression <- c()
+  regression_sq <- c()
+  for (i in 1:5000){
+    Z_i <- sprintf("Z_%d",i)
+    Y <- data$Y_0*(1-data[Z_i]) + data$Y_1*(data[Z_i])
+    colnames(Y) <- c('Y')
+    # dif means:
+    this_mean <- mean(Y[data[Z_i]==1]) - mean(Y[data[Z_i]==0])
+    difmeans <- c(difmeans, this_mean)
+    # regression:
+    I_hate_R <- data.frame(Y = Y[,1], X = data$X, Z = data[Z_i][,1])
+    head(I_hate_R)
+    ols <- glm(formula = Y ~ X + Z, data = I_hate_R)
+    this_effect <- summary(ols)$coefficients[3,1]
+    regression <- c(regression, this_effect)
+    ols_sq <- lm(formula = Y ~ Z + poly(X, 2), data = I_hate_R)
+    this_effect_sq <- summary(ols_sq)$coefficients[2,1]
+    regression_sq <- c(regression_sq, this_effect_sq)
+  }
+  r_is_dumb <- list("difmeans" = difmeans, "regression" = regression, "poly" = regression_sq)
+  return(r_is_dumb)
+}
+```
+
+```{r}
+three <- sate_three_methods_dist(randomization_df_nlin)
+difmeans <- three$difmeans
+regression <- three$regression
+reg_poly <- three$poly
+```
+
+(e) Calculate the standardized bias (bias divided by the standard deviation of Y) of these estimators relative to SATE. Which are biased?
+
+```{r}
+ET_i <- df_nlin['Y_1']-df_nlin['Y_0']
+SATE_true <- mean(ET_i[,1])
+#print(sprintf("SATE_true = %.2f", SATE_true))
+
+#Difference in means:
+bias_difmeans <- (SATE_true - mean(difmeans))/sd(df_nlin$Y)
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+
+#linear regression:
+bias_reg <- (SATE_true - mean(regression))/sd(df_nlin$Y)
+print(sprintf("Bias, regression: %f", bias_reg))
+
+#polynomial regression:
+bias_reg_poly <- (SATE_true - mean(reg_poly))/sd(df_nlin$Y)
+print(sprintf("Bias, polynomial regression: %f", bias_reg_poly))
+
+```
+
+(f) What assumption is violated by the difference in means estimator?  What assumption is violated by the linear regression estimator?
+```{r}
+# As expected, the bias is improved in regression versus difference in means, the latter violating
+# the ignorability assumption. In the DGP, X confounds the effect of treatment on the outcome.
+# The bias is furthermore improved in the polynomial regression versus the linear.
+# This is because a linear equation is not the correct parametric model form for the data.
+```
+
+## Part C: Optional Challenge Question
+
+## Simulate Linear Causal Structure With Mutiple Covariates
+
+(a). Simulate observational data set from following distribution 
+
+P(X1,X2,X3,Y1,Y0,Z)=P(X1)P(X2)P(X3)P(Z|X1,X2,X3)P(Y1,Y0|Z,X1,X2,X3).
+
+Once again make sure that the probability of being treated for each person falls between .05 and .95 and there is a reasonable amount of overlap across the treatment and control groups.  Generate the response surface as in the following:
+$$
+Y(0) =  \mathbf{}X1 +\mathbf{}X2+\mathbf{}X3+\mathbf{\epsilon}
+$$
+$$
+Y(1) =  \mathbf{}X1 +\mathbf{}X2+\mathbf{}X3+5+\mathbf{\epsilon}
+$$
+```{r}
+X_1 <- rnorm(n=1000, mean = 0, sd = 1)
+X_2 <- rnorm(n=1000, mean = 2, sd = 1)
+X_3 <- rnorm(n=1000, mean = 3, sd = 1)
+quantiles = X_1 + 2*X_2 + 4*X_3 + rnorm(1000, mean = 0, sd = 1) 
+p <- pglogis(quantiles, location = 11, log = FALSE) 
+p <- (0.95-0.05)*(p-min(p))/(max(p)-min(p))+0.05 
+plot(quantiles, p, xlab="quantiles = X_1 + 2*X_2 + 4*X_3 + noise")
+Z <- rbern(1000, p)
+
+df_three <- data.frame(X_1=X_1, X_2=X_2, X_3=X_3, q=quantiles, p=p, Z=Z)
+head(df_three)
+
+df_three['Y_0'] <- df_three$X_1 + df_three$X_2 + df_three$X_3 +        rnorm(n = 1000, mean = 0, sd = 1)
+df_three['Y_1'] <- df_three$X_1 + df_three$X_2 + df_three$X_3 + 5 +    rnorm(n = 1000, mean = 0, sd = 1)
+
+df_three['Y'] <- df_three['Y_0']*(1-df_three['Z']) + df_three['Y_1']*df_three['Z']
+```
+(b) Create randomization distributions for (1) a regression estimator that controls for only one of the 3 covariates and (2) a regression estimator that controls for all 3 covariates.  Evaluate the standardized bias of these estimators relative to SATE.
+```{r}
+#I'm going to generate 5,000 draws
+randomization_df_three <- df_three
+for (i in 1:5000){
+  randomization_df_three[sprintf("Z_%d",i)] <- rbern(1000, randomization_df_three$p)}
+#head(randomization_df_nlin)
+```
+
+```{r}
+#I'll need this function:
+sate_three_vars <- function(data){
+  regression_one <- c()
+  regression_all <- c()
+  for (i in 1:1){
+    Z_i <- sprintf("Z_%d",i)
+    Y <- data$Y_0*(1-data[Z_i]) + data$Y_1*(data[Z_i])
+    colnames(Y) <- c('Y')
+    # regression on one var:
+    I_hate_R <- data.frame(Y = Y[,1], X_1 = data$X_1, X_2 = data$X_2, X_3 = data$X_3, Z = data[Z_i][,1])
+    head(I_hate_R)
+    ols <- glm(formula = Y ~ X_1 + Z, data = I_hate_R)
+    this_effect_one <- summary(ols)$coefficients[3,1]
+    regression_one <- c(regression_one, this_effect_one)
+    ols_all <- glm(formula = Y ~ X_1 + X_2 + X_3 + Z, data = I_hate_R)
+    this_effect_all <- summary(ols_all)$coefficients[5,1]
+    regression_all <- c(regression_all, this_effect_all)
+  }
+  r_is_dumb <- list("regression_one" = regression_one, "regression_all" = regression_all)
+  return(r_is_dumb)
+}
+```
+
+```{r}
+two_methods_three_vars <- sate_three_vars(randomization_df_three)
+regression_one <- two_methods_three_vars$regression_one
+regression_all <- two_methods_three_vars$regression_all
+```
+
+(e) Calculate the standardized bias (bias divided by the standard deviation of Y) of these estimators relative to SATE. Which are biased?
+
+```{r}
+ET_i <- df_three['Y_1']-df_three['Y_0']
+SATE_true <- mean(ET_i[,1])
+#print(sprintf("SATE_true = %.2f", SATE_true))
+
+# regression on Z and X_1:
+bias_reg_one <- (SATE_true - mean(regression_one))/sd(df_three$Y)
+print(sprintf("Bias, regression on Z and X_1: %f", bias_reg_one))
+
+# regression on Z and X_1, X_2, X_3:
+bias_reg_all <- (SATE_true - mean(regression_all))/sd(df_three$Y)
+print(sprintf("Bias, regression on Z, X_1, X_2, X_3: %f", bias_reg_all))
+```
+```{r}
+# As expected, the estimate obtained from a regression of Y on just X_1 suffers from massive
+# Omitted Variable Bias.
+```
+(c) Suppose you instead want to generate from the more general representation of this DGP: P(X1,X2,X3,Y1,Y0,Z)=P(X1,X2,X3)P(Z|X1,X2,X3)
+P(Y1,Y0|Z,X1,X2,X3).
+
++ (i) What is the key difference between the assumptions in this DGP and the previous one?
+```{r message=FALSE, fig.width=1, fig.height=1, warning=FALSE}
+# In the first DGP, X_1, X_2, and X_3 were consiedererd to be independent (unconditionally)
+# This new GDP, however, can be re-written using Bayes rule as:
+# P(X1,X2,X3,Y1,Y0,Z)=P(X3)P(X2|X3)P(X1|X2,X3)P(Z|X1,X2,X3)P(Y1,Y0|Z,X1,X2,X3).
+# So, the ned DAG is:
+dag <- dagify(Z ~ X1 + X2+ X3,
+              Y ~ X1 + X2+ X3 + Z,
+              X1 ~ X2 + X3,
+              X2 ~ X3,
+              exposure = "Z",
+              outcome = "Y")
+dag %>% ggplot(aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_dag_point() +
+    geom_dag_edges() +
+    geom_dag_text() +
+    theme_dag()
+
+```
++ (ii) Provide code to simulate X1,X2 and X3 for this DGP?
+```{r}
+X_3 <- rnorm(n=1000, mean = 1, sd = 1)
+X_2 <- 4*X_3 + rnorm(1000, 0, 1)
+X_1 <- X_2 + X_3**2 + rnorm(1000, 0, 1)
+
+quantiles = X_1 + 2*X_2 + 4*X_3 + rnorm(1000, mean = 0, sd = 1) 
+p <- pglogis(quantiles, location = 11, log = FALSE) 
+p <- (0.95-0.05)*(p-min(p))/(max(p)-min(p))+0.05 
+plot(quantiles, p, xlab="quantiles = X_1 + 2*X_2 + 4*X_3 + noise")
+Z <- rbern(1000, p)
+
+df_star <- data.frame(X_1=X_1, X_2=X_2, X_3=X_3, q=quantiles, p=p, Z=Z)
+
+df_star['Y_0'] <- df_star$X_1 + df_star$X_2 + df_star$X_3 +         rnorm(n = 1000, mean = 0, sd = 1)
+df_star['Y_1'] <- df_star$X_1 + df_star$X_2 + df_star$X_3 + 64 +    rnorm(n = 1000, mean = 0, sd = 1)
+
+df_star['Y'] <- df_star['Y_0']*(1-df_star['Z']) + df_star['Y_1']*df_star['Z']
+head(df_star)
+# for example
+```

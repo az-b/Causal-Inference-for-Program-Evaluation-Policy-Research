@@ -1,0 +1,149 @@
+---
+title: "DID"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output: pdf_document
+---
+```{r echo=FALSE, message=FALSE}
+set.seed(1234)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+## Objective 
+The goal of this exercise is to simulate data that may or may not satisfy the assumptions of a difference in differences design.
+
+##### PART A: DID
+The setting here is similar to the last assignment (RDD).
+
+You will simulate hypothetical data collected on women who gave birth at any one of several hospitals in disadvantaged neighborhoods in New York City in 2010. This time we are envisioning a government policy that makes available job training for teen mothers.  This program is only available for women in households with income below $20,000 at the time they gave birth. The general question of interest is whether this program increases annual income 3 years later.  You will generate data for a sample of 1000 individuals. For this assignment we will make the unrealistic assumption that everyone who is eligible for the program participates and no one participates who is not eligible.  
+
+#### Question 1. God role: simulate income.
+Simulate the "assignment variable" (sometimes referred to as the "running variable", "forcing variable", or "rating"), income, in units of thousands of dollars.  Use the following model:
+
+$$ 
+X \sim N(30,100)
+$$
+Then plot using a histogram.
+
+```{r}
+X <- rnorm(n = 1000, mean = 30, sd = 10)
+hist(X)
+```
+#### Question 2. Policy maker role:  Assign eligibility indicator.
+Create an indicator for program eligibility for this sample.  Call this variable "eligible".  (You can use the same code as the previous assignment.)
+
+```{r}
+eligible <- ifelse(X<20, 1, 0)
+head(eligible)
+```
+
+#### Question 3:  God role.
+For question 3 you will simulate income at 3 years post treatment in thousands of dollars. You will assume linear models for both E[Y(0) | X] and E[Y(1) | X].  The *expected* treatment effect for everyone should be 4 (in other words, E[Y(1) - Y(0) | X] should be 4 at all levels of X).  The residual standard deviation of each  potential outcome should be *2*.  
+  a) You will simulate using the following model
+$$
+  Y(0) \sim N(6 + .3*\text{income}_{\text{pre}}, 2^2)\\
+  Y(1) \sim N(6 + .3*\text{income}_{\text{pre}}+4, 2^2)
+$$
+  b) You will save two datasets:  
+      (1) fullA should have the forcing variable and both potential outcomes
+      (2) obsA should have the forcing variable, the eligibility variable,        and the observed outcome.
+```{r}
+df <- data.frame(income_before=X, eligible=eligible)
+
+df['Y_0'] <- rnorm(1000, 6 + .3*X, 2)
+df['Y_1'] <- rnorm(1000, 6 + .3*X + 4, 2)
+
+#df$Y_0[df$Y_0<0]
+#df$Y_1[df$Y_1<0]
+
+ET_i <- df['Y_1']-df['Y_0']
+mean(ET_i[,1])
+
+df['Y'] <- df$Y_0*(1-df$eligible) + df$Y_1*df$eligible
+fullA <- df %>% select(income_before, Y_1, Y_0)
+obsA <- df %>% select(income_before, eligible, Y)
+head(fullA)
+head(obsA)
+```
+
+#### Question 4.  Researcher and god role. Plot your data!
+Make a scatter plots of pre-treatment income (x-axis) versus observed post-treatment income (y-axis). Plot eligible participants in red and non-eligible participants in blue.
+```{r}
+obsA$eligible <- factor(obsA$eligible, levels = c(1,0))
+ggplot(obsA, aes(x=income_before, y=Y, color = eligible)) + 
+  geom_point() + ggtitle("Observations from World A")#+geom_smooth(method=lm)
+```
+
+Now plot the full response surface.
+```{r}
+I_hate_ggplot <- melt(fullA, id.vars="income_before")
+ggplot(I_hate_ggplot, aes(income_before,value, col=variable)) + 
+  geom_point() + stat_smooth() 
+```
+
+Now make a plot like the ones in the DID lecture with time on the x axis and income on the y axis.  Plot observed means as open circles; blue corresponds to the control and red corresponds to the treatment.  In the same figure plot 
+$$E[Y(1) \mid  Z=0]$$ 
+using different red symbol (square, triangle, filled in circle).
+```{r, echo=FALSE, message=FALSE}
+mean_before_nonel <- mean(obsA[obsA$eligible==0,]$income_before)
+mean_after_nonel <- mean(obsA[obsA$eligible==0,]$Y)
+mean_before_el <- mean(obsA[obsA$eligible==1,]$income_before)
+mean_after_el <- mean(obsA[obsA$eligible==1,]$Y)
+mean_Y1_Z0 <- mean(fullA$Y_1[fullA$income_before>20])
+#mean_Y1_Z0 <- data.frame(x = c(0,1), mean_Y1_Z0=c(mean_Y1_Z0, NA))
+mean_Y1_Z0 <- data.frame(x = c(0,1), mean_Y1_Z0=c(NA, mean_Y1_Z0))
+#mean_Y1_Z0
+
+new_df <- data.frame(x = c(0,1), treatment = c(mean_before_el, mean_after_el), control = c(mean_before_nonel, mean_after_nonel))
+
+I_hate_ggplot <- melt(new_df, id.vars="x")
+
+ggplot() + 
+  geom_point(data = I_hate_ggplot, aes(x=x, value, col=variable), shape=1) + geom_point(data = data.frame(mean_Y1_Z0), aes(x=c(0,1), y=mean_Y1_Z0), colour='red', shape=3) + stat_smooth() 
+
+
+```
+Based on what you know about the DID assumptions, will the DID estimate of E[Y(1)-Y(0) | Z=0] be close to the truth?  Why or why not?   
+
+@@@@@@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@@@@@@@@     
+The estimate will be far from truth. Looking at the E(Y_1 | Z=0) that we computed, we can see how different it is from what we would have obtained had we assumed that the control dynamics applies to the treated (had they not received the treatment).    
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+#### Question 5.  Researcher role.  Estimate the treatment effect using all the data using two approaches:
+  a) a regression discontinuity approach (linear model only)
+```{r}
+obsA$eligible <- 2-as.numeric(obsA$eligible) # because I turned 'eligible' into a factor before, 
+# and lest I get a negative coefficient
+summary(glm(Y ~ eligible + income_before, data=obsA))$coefficients[2, 1:2]
+```
+  b) a DID approach
+```{r}
+delta <- obsA$Y - obsA$income_before
+obsA$delta <- delta
+summary(glm(delta ~ eligible, data=obsA))$coefficients[2,1:2]
+```
+#### Question 6.  Researcher and god roles.  Thinking about the assumptions?
+Can you think of a way of altering the simulation setup so that the DID assumptions would hold? Make this change, rerun (3) and (5) above, and comment on what you find.
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@   
+DID estimation requires that in the absence of treatment, the difference between the treatment and control groups is constant over time. Fixing the coefficients of pre-treatment income to be 1 should make the (new) DGP satisfy the assumption. Let's verify this:     
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+```{r}
+df2 <- data.frame(income_before=X, eligible=eligible)
+
+df2['Y_0'] <- rnorm(1000, 6 + X, 2)
+df2['Y_1'] <- rnorm(1000, 6 + X + 4, 2)
+df2['Y'] <- df2$Y_0*(1-df2$eligible) + df2$Y_1*df2$eligible
+
+obsA2<- df2 %>% select(income_before, eligible, Y)
+#reg discontinuity
+summary(glm(Y ~ eligible + income_before, data=obsA2))$coefficients[2, 1:2]
+#DID
+delta <- obsA2$Y - obsA2$income_before
+obsA2$delta <- delta
+summary(glm(delta ~ eligible, data=obsA2))$coefficients[2,1:2]
+```
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Yes, it worked, as expected.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   

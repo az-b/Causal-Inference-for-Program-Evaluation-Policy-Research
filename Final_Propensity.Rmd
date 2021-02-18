@@ -1,0 +1,648 @@
+---
+title: "B0yarskayaM_Q1"
+author: "Margar1ta B0yarskaya"
+output: pdf_document
+---
+```{r echo=FALSE, message=FALSE}
+set.seed(1234)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(truncnorm)
+library(ggdag)
+library(glogis)
+library('arm')
+```
+## QUESTION 1: PROPENSITY SCORES
+
+##### SECTION 1: MOTIVATING SCENARIO
+Description of a hypothetical real-life scenario that maps to the variables described (e.g. see some of the examples from your homework assignments). (about 2 paragraphs)
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+
+ I will run a simulated study of the effects of an imaginary Cash Transfer pilot project on employment one year after the conclusion of the study. 
+ In this simulated study, an unconditional cash payment is transferred to one individual per participating household regularly for the duration of 2 years.   
+ 
+ In a georgaphical locality where the pilot takes place, the age of retirement is 61 years for persons of any gender. Any resident between the ages of 18 and 58 is eligible to participate. The amount of payent is equal to a fixed amount.
+ 
+The outcome is *average number of hours worked weekly per 'working age' adult member of the participant's household* (weekly hours worked during the 13-th month after the conclusion of the cash transfers, averaged for 4 weeks, averaged for all 'working age' adults in the household). This number lies in the [0, 21*7] interval.
+
+ 
+For Worlds A and B, I will generate the following covariates for the *population* of size 1000: 
+- *disability* status of the person.   
+- *hh_sz*: size of a person's household (number of members residing together or jointly owning/controlling economic resources).   
+- *inc*: Household (per-head) monetary income at the time of enrollment (in thousands of U.S. dollars)   
+- *uni_edu*: Indicator of holding a university degree at the time of enrollment.   
+- *n_dep*: Number of dependents in the household.  We define *dependent* household members as: adults over the age of 58; children under the age of 15; persons with disability; persons with chronic illness. The number cannot be larger than the number of household members less one.   
+
+For World C, I will create a setup  which violates ignorabilitY. I will generate the same covariates, but in addition:
+- *is_minority*: Indicator of whether a person self-identifies as a member of ethnic or racial group other than white.
+- *homeowner*: Indicator of ownership of current place of residence at the time of enrollment.  
+These two confounders will be *unobserved* by the researcher, will have direct effect on other ones, and will confound the treatment and the ouctome.   
+
+
+*CASH* will be the binary treatment variable.   
+Selection bias is the usual motivation for using propensity score matching. I will model the self-selection of individuals into the study such that individuals are less likely to apply if they are university educated, have high income, and/or are home owners. Individuals are more likely to apply if they have many dependents, identify as non-white, have a disability, and have low income.
+
+The outcome of interest is the measure of hours worked, *HRS_WRK*, after 3 years from the study onset.
+
+For worlds A and B, I will follow the assignment instructions, using linear and a quadratic response surfaces respectively.    
+For World C, the response will be quadratic in some of the observed covariates, but will also depend on the unobserved confounders.   
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+##### SECTION 2: DGP DESCRIPTION
+Description of the data generating process. 
+Write out the formal models.
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@ 
+
+WORLD A AND WORLD B: WE OBSERVE ALL CONFOUNDERS (DGP will include only 5 variables besides treatment and outcome)
+$$ disability \sim Bernoulli(0.1) $$
+$$household\_size \sim int(truncate(N(3,2.5))), household\_size \in [0,10]$$ 
+$$income \sim Benroulli(\mu=30 + 5*household\_size, \sigma^2 = 10^2) $$
+$$university\_education \sim Bernoulli(0.6-0.2*I_{[income<20]})$$
+$$num\_dependents \sim int(truncate(N(2,2.5))), num\_dependents_i \in [0,household\_size_i]$$
+$$q_{not\_apply} := income + 3*university\_education -2*num\_dependents - 2*disability - household\_size$$
+$$p_{apply} := 1-logit(q_{not\_apply}, location=0.9*mean(q_{not\_apply}), scale=1.8)$$
+$$CASH \sim Bernoulli(p_{apply})$$
+$$Y(0)_A := 0.6*income + 7*university\_educated - 5*num\_dependents - 20*disability + 4*household\_size + \epsilon_{A0}$$
+$$Y(1)_A := 10 + 0.6*income + 7*university\_educated - 5*num\_dependents - 20*disability + 4*household\_size + \epsilon_{A1},$$
+where$$\epsilon_{Ai} \sim N(0,1)$$,
+
+$$Y(0)_B <- 0.2*(mean(income)-income)^2 + 7*university\_edu - 5*num\_dependents - 20*disability + $$
+$$+4*household\_size + \epsilon_{B0}$$
+$$Y(1)_B <- 4 + 0.2*(mean(income)-income)^2 + 7*university\_edu - 5*num\_dependents - 20*disability +$$
+$$+4*household\_size + \epsilon_{B0}$$
+where$$\epsilon_{Bi} \sim N(0,1)$$,
+
+WORLD C: WE OBSERVE ONLY 5 CONFOUDNERS, BUT THE DGP INCLUDES OTHER CONFOUNDERS THAT REMAIN UNOBSERVED 
+(violation of ignorability)
+$$disability \sim Bernoulli(0.1) $$
+$$household\_size \sim int(truncate(N(3,2.5))), household\_size \in [0,10] $$  
+$$is\_minority \sim Bernoulli(1, 0.21) $$
+$$income \sim Benroulli(\mu=30 + 5*household\_size - 6*is\_minority, \sigma^2 = 10^2) $$
+$$university\_education \sim Bernoulli(0.6-0.2*I_{[income<20]}) $$
+$$num\_dependents \sim int(truncate(N(2,2.5))), num\_dependents_i \in [0,household\_size_i] $$  
+$$q_{home} := income + 10*university\_education + A,$$
+$$\text{where } A\sim N(\mu= 20 - 3*is\_minority + 2*disability, \sigma^2 = 1) $$
+$$p_{home} := logit(q_{home}, location=max(q)*0.5, scale=0.9) $$\
+$$is\_homeowner \sim Bernoulli(p_{home})$$
+
+$$q_{not\_apply} := income + 5*homeowner + 3*university\_education -$$
+$$-2*num\_dependents - 3*is\_minority - 2*disability - household\_size$$
+$$p_{apply} := 1-logit(q_{not\_apply}, location=0.9*mean(q_{not\_apply}), scale=1.8) $$
+$$CASH \sim Bernoulli(p_{apply})$$
+
+$$Y(0)_C := 0.2*(mean(income)-income)^2 - is\_minority + homeowner + 7*university\_educated -$$
+$$-5*num\_dependents - 20*disability + 4*household\_size + \epsilon_{C0}$$
+
+$$Y(1)_C := 0.2*(mean(income)-income)^2 - is\_minority + homeowner + 7*university\_educated -$$
+$$-5*num\_dependents - 20*disability + 4*household\_size + \epsilon_{C1},$$
+where$$\epsilon_{Ci} \sim N(0,1)$$
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+##### SECTION 3: ASSUMPTIONS
+Discuss the assumptions required for the method to yield a valid causal estimate for the estimand. 
+
+The estimand of interest is ATT.
+
+The assumptions required by the propensity score matching method are:
+
+1) Common support: for each observation in the treatment group (in the case of estimating ATT!), there must exist a sufficiently similar / comparable observation from the control group. This amounts to requiring availability of counterfactuals. If treatment and control groups do not have sufficient overlap, further assumptions must be made about validity of extrapolating the model outside of the overlap region (or, we could limit inference to the overlap interval).   
+2) Ignorablity: Y(1), Y(0) indep Z | X. This requires that observed confounders are *the only* confounders. 
+If ignorability holds, then, controlling for the propensity score, we should be able to get an unbiased estimate of the effect. Worlds A and B in my example are designed to satisfy ignorability, but World C is designed to violate it, so I expect to get biased estimates.   
+3) SUTVA: no interference between treatment assignment of ondividuals. SUTVA also presupposes clearly defined, non-varying treatments.  
+4) Correctly chosen model specifications for computing propensity scores. In particular, accurate models will show good balance in resulting propensity scores distributions (first moments, second moments). Imbalance can becone a source of bias in the effect estimates: if the predictors are not distributed similarly in the two groups, the bias arising from bad model fit is exacerbated. 
+
+@@@@@@@@@@@@@@@@@ ATTENTION! @@@@@@@@@@@@@@@@@@@  
+I will reorder my asnwers to Sections 4 and 5: in my code, the DGP should come before the implementation of the methods.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+##### SECTION 5: DGP CODE
+Provide the R code used to generate the data.
+
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+First, let us consider the DGP for covariates in worlds A and B:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@     
+```{r}
+pop_sz = 1000
+
+# has disability:
+disability <- rbinom(pop_sz, 1, 0.1) 
+
+# household size:
+hh_sz <- as.integer(rtruncnorm(pop_sz, a=1, b=11, 3, 2.5))
+#plot_hh_sz <- ggplot(data.frame(household_sz=hh_sz), aes(x = household_sz))
+#plot_hh_sz + geom_histogram(aes(y = ..density..), 
+#                   colour="black", fill="white",position = "dodge", bins = 30)+xlim(0,11)+ylim(0,0.6)
+
+# income:
+inc <- rnorm(pop_sz, mean = 30+5*hh_sz, sd = 10)
+
+# has a university degree:
+uni_edu <- rbinom(pop_sz, 1, 0.6-0.2*(inc<20)) #university degree
+
+# number of dependents:
+n_dep <- as.integer(rtruncnorm(pop_sz, a=0, b=hh_sz, 2, 2.5))
+
+
+#self-selection into the study: 
+# less likely to apply if uni educated, high income
+# more likely to apply if many dependents, disability, low income
+non_apply_quantiles <- inc + 3*uni_edu -2*n_dep - 2*disability - hh_sz
+p_apply <- 1-pglogis(non_apply_quantiles, location=0.9*mean(non_apply_quantiles), scale=8.8,log = FALSE)
+CASH <- rbinom(pop_sz, 1, p_apply)
+
+#how many people enrolled in the study in World A?
+sum(CASH)
+```
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Now let us model the potential outcomes.   
+For World A:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+```{r}
+#WORLD_A:
+Y_0_A <- 0.6*inc + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + rnorm(1000, mean = 0, sd = 1)
+Y_0_A <- ifelse (Y_0_A > 7*21, 7*21, Y_0_A)
+Y_0_A <- ifelse (Y_0_A < 0, 0, Y_0_A)
+
+Y_1_A <- 10 + 0.6*inc + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + rnorm(1000, mean = 0, sd = 1)
+Y_1_A <- ifelse (Y_1_A > 7*21, 7*21, Y_1_A)
+Y_1_A <- ifelse (Y_1_A < 0, 0, Y_1_A)
+#plot(Y_0_A)
+#plot(Y_1_A)
+
+diff <- Y_1_A - Y_0_A
+true_A <- mean(diff[CASH==1])
+true_A
+
+#BIND DATA:
+fullA <- data.frame(disability, hh_sz, inc, uni_edu, n_dep, CASH, Y_0_A, Y_1_A)
+Y_A <- Y_0_A*(1-fullA$CASH) + Y_1_A*fullA$CASH
+obsA <- data.frame(disability, hh_sz, inc, uni_edu, n_dep, CASH, Y=Y_A)
+head(fullA)
+head(obsA)
+```
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+for World B:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+```{r}
+#WORLD_B:
+# I want the effects to be smaller for very low income and very high income people:
+Y_0_B <- 0.2*(mean(inc)-inc)^2 + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + 
+  rnorm(1000, mean = 0, sd = 1)
+Y_0_B <- ifelse (Y_0_B > 7*21, 7*21, Y_0_B)
+Y_0_B <- ifelse (Y_0_B < 0, 0, Y_0_B)
+
+Y_1_B <- 4 + 0.2*(mean(inc)-inc)^2 + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + 
+  rnorm(1000, mean = 0, sd = 1)
+Y_1_B <- ifelse (Y_1_B > 7*21, 7*21, Y_1_B)
+Y_1_B <- ifelse (Y_1_B < 0, 0, Y_1_B)
+
+diff <- Y_1_B - Y_0_B
+true_B <- mean(diff[CASH==1])
+true_B
+
+#BIND DATA:
+fullB <- data.frame(disability, hh_sz, inc, uni_edu, n_dep, CASH, Y_0_B, Y_1_B)
+Y_B <- Y_0_B*(1-fullB$CASH) + Y_1_B*fullB$CASH
+obsB <- data.frame(disability, hh_sz, inc, uni_edu, n_dep, CASH, Y=Y_B)
+head(fullB)
+head(obsB)
+```
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+For world C, below is the full DGP, including the covariates which will remain unobserved to the researchers.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+```{r}
+# has disability:
+disability <- rbinom(pop_sz, 1, 0.1) 
+
+# household size:
+hh_sz <- as.integer(rtruncnorm(pop_sz, a=1, b=11, 3, 2.5))
+#plot_hh_sz <- ggplot(data.frame(household_sz=hh_sz), aes(x = household_sz))
+#plot_hh_sz + geom_histogram(aes(y = ..density..), 
+#                   colour="black", fill="white",position = "dodge", bins = 30)+xlim(0,11)+ylim(0,0.6)
+
+# self-identifies as an ethnic or racial minority group member:
+is_minority <- rbinom(pop_sz, 1, 0.21)
+
+# income:
+inc <- rnorm(pop_sz, mean = 30+5*hh_sz-6*is_minority, sd = 10)
+#is_minority_temp <- factor(is_minority, levels = c(0,1))
+#ggplot(data.frame(inc, is_minority=is_minority_temp), aes(x = inc, fill = is_minority)) +    
+#  geom_histogram(alpha = 0.5, position = "identity")+xlab("income")
+
+# has a university degree:
+uni_edu <- rbinom(pop_sz, 1, 0.6-0.2*(inc<20)) #university degree
+
+# number of dependents:
+n_dep <- as.integer(rtruncnorm(pop_sz, a=0, b=hh_sz, 2, 2.5))
+
+# is a home owner (singularly or jointly)
+homeownership_quantiles <- inc + 10*uni_edu + 
+  rnorm(pop_sz, mean = 20-3*is_minority+2*disability, sd = 1) 
+p_homeowner <- pglogis(homeownership_quantiles, location=max(homeownership_quantiles)*0.5, 
+                       scale=0.9,log = FALSE)
+homeowner <- rbinom(pop_sz, 1, p_homeowner)
+
+
+#self-selection into the study: 
+# less likely to apply if uni educated, high income, home owner 
+# more likely to apply if many dependents, is minority, disability, low income
+non_apply_quantiles <- inc + 5*homeowner + 3*uni_edu -2*n_dep - 
+  3*is_minority - 2*disability - hh_sz
+p_apply <- 1-pglogis(non_apply_quantiles, location=0.9*mean(non_apply_quantiles), 
+                     scale=1.8,log = FALSE)
+CASH <- rbinom(pop_sz, 1,p_apply)
+
+#how many people enrolled in the study?
+sum(CASH)
+```
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Potential outcomes for World C (violation of ignorability):   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+```{r}
+Y_0_C <- 0.2*(mean(inc)-inc)^2 - is_minority + homeowner + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + rnorm(1000, mean = 0, sd = 1)
+Y_0_C <- ifelse (Y_0_C > 7*21, 7*21, Y_0_C)
+Y_0_C <- ifelse (Y_0_C < 0, 0, Y_0_C)
+
+Y_1_C <- 4 + 0.2*(mean(inc)-inc)^2 - is_minority + homeowner + 7*uni_edu - 5*n_dep - 20*disability + 4*hh_sz + rnorm(1000, mean = 0, sd = 1)
+Y_1_C <- ifelse (Y_1_C > 7*21, 7*21, Y_1_C)
+Y_1_C <- ifelse (Y_1_C < 0, 0, Y_1_C)
+
+diff <- Y_1_C - Y_0_C
+true_C <- mean(diff[CASH==1])
+true_C
+
+
+#BIND DATA: 
+fullC <- data.frame(disability, hh_sz, inc, is_minority, homeowner, uni_edu, n_dep, CASH, Y_0_C, Y_1_C)
+Y_C <- Y_0_C*(1-fullC$CASH) + Y_1_C*fullC$CASH
+# For ObsC, binding the same covariates as for Worlds A and B, although the values
+#are verydifferent due to different DGP, unobserved confounders
+obsC <- data.frame(disability, hh_sz, inc, uni_edu, n_dep, CASH, Y=Y_C)
+head(fullC)
+head(obsC)
+```
+
+##### SECTION 4: METHODS AND ESTIMANDS
+a) Provide a description of the method(s) used and the estimand. If the
+method being addressed is a propensity score approach then also describe
+the role of the balance and overlap diagnostics. (3-4 paragraphs) 
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+
+The estimand of interest is ATT. We will compare the *linear regression* estimate (of outcomes on the treatment and confounding covariates) to a *propensity score matching* estimate.   
+ 
+The steps of the propensity score estimation are:    
+1) Select (potential) confounders represented in the model.   
+In my case, those will be $hh_sz, disability, income, n_dep$, and $uni_edu$.   
+2) Estimate propensity score conditional on confounders.   
+I will use logistic regression.   
+3) Restructure the dataset based on propensity score to create a pseudo population where treated and control groups look very similar.   
+I will use k-to-1 nearest neighbor matching with replacement (since the group of interest is the smaller group). I will use the *arm* package, whereby the *cnts* component of the output will list the number of times a match to some treatment observation was was made using a given control observation. The weights will be assigned as equal to *1* for the treated, and equal to *cnts* for the control.
+  
+4) Check balance within the new pseudo-population and assess the degree of overlap (common support). Balance is necessary for the data to be as good as randomized experiment data. In the absence of a randomized experiment, we want the density of $X_i$ for the treated and the untreated to be as similar as possible. As discussed above, overlap is necessary to assure availability of (quasi-)counterfactuals.    
+For these diagnostics, I will use both plots and comparative balance tables, as described in Homework 4.     
+[Here possibly return to Step 2]   
+5) Estimate the average treatment effect (ATT) on the restructured data.   
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+b) Provide the code used to estimate the results.
+
+
+```{r}
+# REGRESSION
+reg_A <- glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data = obsA)
+#summary(reg_A)
+effect_std_A <- c(summary(reg_A)$coefficients[2, 1], summary(reg_A)$coefficients[2, 2])
+print("World A effect estimate, std:")
+effect_std_A
+
+reg_B <- glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data = obsB)
+#summary(reg_B)
+effect_std_B <- c(summary(reg_B)$coefficients[2, 1], summary(reg_B)$coefficients[2, 2])
+print("World B effect estimate, std:")
+effect_std_B
+
+reg_C <- glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data = obsC)
+#summary(reg_C)
+effect_std_C <- c(summary(reg_C)$coefficients[2, 1], summary(reg_C)$coefficients[2, 2])
+print("World C effect estimate, std:")
+effect_std_C
+```
+
+```{r}
+## WORLDS A and B: ##
+# PROPENSITY SCORES: 
+prop_logit_AB <- glm (CASH ~ ., data = obsA[ , -7], family = binomial(link = "logit"))
+propensity_AB <- data.frame(score = predict(prop_logit_AB, type = "response"), 
+                            treat = prop_logit_AB$model$CASH)
+head(propensity_AB)
+# MATCHING:
+matches_AB <- matching(obsA$CASH, score = propensity_AB$score, replace = TRUE)
+weights_AB <- matches_AB$cnts
+weights_AB <- data.frame (weights = weights_AB, treat = prop_logit_AB$model$CASH)
+head(weights_AB)
+
+
+## WORLD C:  (recall the covariates data is generted differently, has dependence on unobserved covs)##
+prop_logit_C <- glm (CASH ~ ., data = obsC[ , -7], family = binomial(link = "logit"))
+propensity_C <- data.frame(score = predict(prop_logit_C, type = "response"), 
+                           treat = prop_logit_C$model$CASH)
+head(propensity_C)
+# MATCHING:
+matches_C <- matching(obsC$CASH, score = propensity_C$score, replace = TRUE)
+weights_C <- matches_C$cnts
+weights_C <- data.frame (weights = weights_C, treat = prop_logit_C$model$CASH)
+head(weights_C)
+```
+
+```{r echo=FALSE, message=FALSE}
+# CHECKING OVERLAP FOR WORLD A, WORLD B:
+
+#I'll need this:
+propensity_AB$treat <- factor(propensity_AB$treat, levels = c(1,0))
+R_is_not_cute <- propensity_AB %>% group_by(treat) %>% summarise(mean=mean(score)) 
+```
+
+```{r}
+# overlap on the propnesity scores:
+ggplot(propensity_AB, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + 
+  ggtitle("Propensity score distribution, Worlds A and B") 
+```
+
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+For propensity scores obtained for World A and World B, there *is* overlap in the distirbutions of propensity scores (but there is some imbalance).        
+This means that for every treated individual we observe some other individual who `looks like them' (if using matching with replacement) in terms of the propensity score, which is a lower-dimensional representation of all selected confounders.  
+
+Now for World C:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+```{r echo=FALSE, message=FALSE}
+# CHECKING OVERLAP FOR WORLD C:
+
+propensity_C$treat <- factor(propensity_C$treat, levels = c(1,0))
+R_is_not_cute <- propensity_C %>% group_by(treat) %>% summarise(mean=mean(score)) 
+```
+
+```{r}
+# overlap on the propnesity scores, World C:
+ggplot(propensity_C, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + 
+  ggtitle("Propensity score distribution, World C") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+Let's zoom into the samll values of counts:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+```{r, tidy=TRUE}
+ggplot(propensity_C, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + 
+  ggtitle("Propensity score distribution (zoomed in, more bins), World C") + coord_cartesian(ylim=c(0,100))
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+In World C, there is imperfect but reasonably good overlap, but great imbalance on the propensity scores.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+Now let's look at overlap on covariates. First, Worlds A and B:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+```{r, echo=FALSE, message=FALSE}
+obsA$treat <- factor(obsA$CASH, levels = c(1,0))
+obsB$treat <- factor(obsB$CASH, levels = c(1,0))
+R_is_not_cute <- obsA %>% group_by(treat) %>% summarise(mean_household_sz=mean(hh_sz), mean_income=mean(inc), mean_n_dependents=mean(n_dep)) 
+```
+
+```{r}
+# (household_size), Worlds A and B:
+ggplot(obsA, aes(x = hh_sz, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean_household_sz, color = treat), linetype="dashed") + 
+  ggtitle("'hh_sz' (household size) distribution, Worlds A and B") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+The means of the two distributions are very close together, and the domains of values for the treated and control gorups overlap. This means we can count on availability of reasonably good 'empirical counterfactuals'.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r}
+# (income), Worlds A and B:
+ggplot(obsA, aes(x = inc, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean_income, color = treat), linetype="dashed") + 
+  ggtitle("'inc' (income) distribution, Worlds A and B") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+The domain of propensity score values of the *treated* has imperfect but substantial overlap with the domain of the *control*. For some of the treated persons (in the lower income deciles) there may not be an observed individual in the control group who `looks like them'. However, the overlap in propensity scores shown above lends me some hope that there will be overlap on this covariate post-matching.   
+The means of the two distributions are reasonably close together.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r}
+# (n_dep), Worlds A and B:
+ggplot(obsA, aes(x = n_dep, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean_n_dependents, color = treat), linetype="dashed") +
+  ggtitle("'n_dep' (number of dependents) distribution, Worlds A and B") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+Almost perfect overlap and balance here.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+Moving on to World C:   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r, echo=FALSE, message=FALSE}
+obsC$treat <- factor(obsC$CASH, levels = c(1,0))
+R_is_not_cute <- obsC %>% group_by(treat) %>% summarise(mean_household_sz=mean(hh_sz), mean_income=mean(inc), mean_n_dependents=mean(n_dep)) 
+```
+
+```{r}
+# (household_size), World C:
+ggplot(obsC, aes(x = hh_sz, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean_household_sz, color = treat), linetype="dashed") +
+  ggtitle("'hh_sz' (household size) distribution, World C") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+The distributions are very similar. We should have no problem matching treatment ovservations to empirical counterfactuals from the controls.    
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r}
+# (income), World C:
+ggplot(obsC, aes(x = inc, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean_income, color = treat), linetype="dashed") + 
+  ggtitle("'inc' (income) distribution, World C") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+As expected from the way we generated data, there is lack of overlap on the 'income' variable (partially due to selection on unobservables which are interdependent with income). This may negatively impact our estimates for World C.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r}
+# (n_dep), World C:
+ggplot(obsC, aes(x = n_dep, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + 
+  geom_vline(data = R_is_not_cute, aes(xintercept=mean_n_dependents, color = treat), linetype="dashed") +
+  ggtitle("'n_dep' (number of dependents) distribution, World C") 
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+Good overlap, as expected given the DGP.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+```{r}
+#let's undo what I did for plotting:
+obsA <- dplyr::select(obsA,-c(treat))
+obsB <- dplyr::select(obsB,-c(treat))
+obsC <- dplyr::select(obsC,-c(treat))
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+#CHECKING BALANCE FUNCTION:
+check_balance <- function(confounders_df, confounders_list, weights){
+  confounders_df <- confounders_df %>% rename(treat = CASH)
+  trt_grp <- confounders_df   %>% filter(treat==1) #%>% add_rownames()
+  ctrl_grp <- confounders_df   %>% filter(treat==0) #%>% add_rownames()
+  
+  trt_weights <- dplyr::select(weights %>% filter(treat==1), weights)
+  ctrl_weights <- dplyr::select(weights %>% filter(treat==0), weights)
+  
+  # means, weighted means:
+  trt_means <- sapply(confounders_list, function(x) mean(trt_grp[, x]))
+  ctrl_means <- sapply(confounders_list, function(x) mean(ctrl_grp[, x]))
+  w_means_trt <- sapply(confounders_list, function(x) sum(trt_weights*trt_grp[, x])/sum(trt_weights))
+  w_means_ctrl <- sapply(confounders_list, function(x) sum(ctrl_weights*ctrl_grp[, x])/sum(ctrl_weights))
+
+  # variances, weighted variances:
+  trt_variances <- sapply(confounders_list, function(x) var(trt_grp[, x]))
+  ctrl_variances <- sapply(confounders_list, function(x) var(ctrl_grp[, x]))
+
+  w_variances_trt <- sapply(confounders_list, function(x) sum(trt_weights * (trt_grp[, x] - 
+                                                                               sum(trt_weights*trt_grp[, x])/sum(trt_weights))^2) / (sum(trt_weights) - 1))
+  w_variances_ctrl <- sapply(confounders_list, function(x) sum(ctrl_weights * (ctrl_grp[, x] -
+                                                                                 sum(ctrl_weights*ctrl_grp[, x])/sum(ctrl_weights))^2) / (sum(ctrl_weights) - 1))
+
+  # mean differences, weighted mean differences:
+  binary_flag <- sapply(confounders_list, function(x) ifelse(length(unique(confounders_df[,x]))<=2, 1, 0))
+  mean_diff_asifnonbinary <- (trt_means - ctrl_means) / sqrt(trt_variances)
+  mean_diff_asifbinary <- trt_means - ctrl_means
+  mean_diff <- binary_flag*mean_diff_asifbinary + (1-binary_flag)*mean_diff_asifnonbinary
+  
+  w_mean_diff_asifnonbinary <- (w_means_trt - w_means_ctrl) / sqrt(w_variances_trt)
+  w_mean_diff_asifbinary <- w_means_trt - w_means_ctrl
+  w_mean_diff <- binary_flag*w_mean_diff_asifbinary + (1-binary_flag)*w_mean_diff_asifnonbinary
+  
+  # sd ratios:
+  sd_ratio <- sqrt(ctrl_variances)/sqrt(trt_variances)
+  w_sd_ratio <- sqrt(w_variances_ctrl)/sqrt(w_variances_trt)
+       
+      
+  output_df <- data.frame(trt_means, ctrl_means, w_means_trt, w_means_ctrl, mean_diff, 
+                          w_mean_diff, sd_ratio, w_sd_ratio)
+  output_df <- round(output_df,3)
+  return(output_df)
+}
+
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+#CHECK BALANCE :
+confounders <- c("disability", "hh_sz", "inc", "uni_edu", "n_dep")
+balance_logit_AB <- check_balance(obsA, confounders, weights_AB)
+balance_logit_AB
+
+balance_logit_C <- check_balance(obsC, confounders, weights_C)
+balance_logit_C
+```
+@@@@@@@@@@@@@@@@@@ ANSWER: @@@@@@@@@@@@@@@@@@@@   
+What we would like to see is reduced mean differences post-matching (compared to unmatched), as well as standard deviation ratios close to 1.  
+Large differences in means may bias the effect estimates. The following covariates appear to raise alarm with respect to mean difference (my rule of thumb: alarming if mean_diff increased substantially AND stands above 0.15).   
+
+WORLDS A, B:   
+*n_dep*   
+WORLD C:   
+*uni_edu*   
+*n_dep*   
+    
+It is encouraging that only one covariate in Worlds A and B (and two in World C) saw a noticable increase in mean difference is insubstantial for all of these covariates, and furthermore the majority of covariates improved to (or orgiginally attained) a low mean difference.   
+It is curious that these covariates are "grand-parents" in our GDP: n_dep, for instance, being among the two truly independent covariates. My guess is thatextreme confounding by other covariates pulls the change in mean difference toward a direction which improved all other 'problematic' covariates but makes the only unproblematic one worse.   
+   
+While for Worlds A and B covariates *disability* and *inc* got a worse post-match sd ratios, the rsults ratios are still within a bound that I will consider tolerable: |ratio-1|>0.5. The only alarming case of post-match sd ratio is thus covariate *inc* in World C. And this is not unexpected given the DGP.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+
+##### SECTION 6: RESULTS
+Provide results (estimate and s.e. or confidence interval) for each method and world in an attractive display (table or figure). Briefly discuss and provide a causal interpretation for one estimate. (a few paragraphs)   
+
+```{r, echo=FALSE, message=FALSE, tidy=TRUE}
+# ATT:
+
+vanilla_summary_A <- summary(glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data=obsA,
+                                 weights=weights_AB$weights))
+logit_match_A <- c(vanilla_summary_A$coefficients[2, 1], vanilla_summary_A$coefficients[2, 2])
+vanilla_summary_B <- summary(glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data=obsB,
+                                 weights=weights_AB$weights))
+logit_match_B <- c(vanilla_summary_B$coefficients[2, 1], vanilla_summary_B$coefficients[2, 2])
+vanilla_summary_C <- summary(glm(Y ~ CASH + hh_sz + disability + inc + n_dep + uni_edu, data=obsC,
+                                 weights=weights_C$weights))
+logit_match_C <- c(vanilla_summary_C$coefficients[2, 1], vanilla_summary_C$coefficients[2, 2])
+
+unmatched_A = c(diff(tapply(obsA$Y, obsA$CASH, mean)), NA)
+unmatched_B = c(diff(tapply(obsB$Y, obsB$CASH, mean)), NA)
+unmatched_C = c(diff(tapply(obsC$Y, obsC$CASH, mean)), NA)
+
+
+glm_A <- effect_std_A
+glm_B <- effect_std_B
+glm_C <- effect_std_C
+
+
+together <- rbind(unmatched_A, unmatched_B, unmatched_C, glm_A, glm_B, glm_C, logit_match_A, 
+                  logit_match_B, logit_match_C)
+colnames(together) <- c("effect estimate", "ste")
+print("")
+together
+
+```
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+The response surface in World A was linear, so the linear regression model fits the data well. However, the matching estimate is closes to the true effect. Indeed, linear regression is likely to introduce bias to the effect estimates when considering areas of the domain (of the group of interest) for which no counterfactual is present in the data.    
+In World B, the logit matching model and the linear model yielded similar estimates. Since the outcomes are generated to be non-linear, the glm estimate is not a good fit, but in this case we have a lot of confounders that *do* figure linearly in the outcome with large coefficients, so the penalty for using a linear model was not large.    
+In World C, the estimates from the propensity score matching model and the linear model are similar. For the same reason as described for World B, the fit of the glm is not much worse than that of a propensity score model, despite a nonlinearity present in generating the potential outcomes. The propensity score model is implemented despite a violation of ignorability, yielding bad estimates.   
+   
+In World B, a causal interpretation is:    
+For heads of household who participated in the Cash Transfer program in this jurisdiction, their average weekly number of hours worked during the 13th month after the conclusion of the experiment was about 10 hours greater than had they not received cash transfers.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@    
+
+
+##### SECTION 7: BIAS ANALYSIS
+Discuss the bias of each method and tie that to what you did to violate the
+assumptions in each world. (about 2 paragraphs)
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+As discussed above, in worlds B and C, a glm estimate is biased due to bad fit to the true shape of the response surface. In World A, however, a bias is still not ruled out in the event that there are unmatched individuals (which, we observed to be true at least for the 'income' variable in our overlap analysis).   
+   
+World C experiments predictably yielded biased estimates due to failure to include an (unobserved) confounder, violating ignorability. In World B, however, due to a large number of confounders, only one of which had a quadratic term in the definition of one of the response surfaces, the effect of an imprudent choice of a model was not too large (glm performs OK).    
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+##### SECTION 8: CONCLUSION
+Conclude with an overview of the lessons you have learned from your
+simulations. (about 2-3 paragraphs)
+
+@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@   
+Confounders violate ignorability and overlap assumptions, make counterfactual comparisons technically impossible and counterfactual statements (causal statements!) ungrounded. Propensity score is a lower-dimensional summary of relevant covariates (possible confounders) that permits establishing a correspondence between observatioins in the group of interest and the comparison group, thus ensuring that counterfactuals are well-defined.  
+Linear regression is likely to introduce bias to the effect estimates when considering areas of the domain (of the group of interest) for which no counterfactual is present in the data. Moreover, linear regression is merely giving the best linear approximation of whatever is the (possibly nonlinear) correct model form for the data.    
+   
+Within the (non-parametric!) propensity score approach, however, there is greater flexibility in choosing a better model specification for fitting the scores, and there are metrics one can use to diagnose the appropriateness of the model choice (as we did above). Our post-match analysis demonstrated that the propensity score matching did attain significant gains on mean difference and sd ratio metrics in Worlds A, B, and C.   
+   
+An important thing I learned is that it would have been easier to assess performance in Worlds B and C if I had only one unobserved confounder in World C and a simpler dependence structure: in my attempt to simulate a realistic scenario, I thought carefully about the DGP and made most covariates interdependent. Moreover, I had two unobserved counfounder in World C, and lack of overlap on a variable that influences many other ones in turn. However, I do believe that my scenario is realistic, and in the future I would try to fit propensity score models with complex higher-order terms (as in homework): for example, it is not implausible that a researcher would have *guessed* that the effect depends on the *distance* of an individual from the mean of the income distirbution.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   

@@ -1,0 +1,356 @@
+---
+title: "Regression Discontinuity Simulation"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r, echo=FALSE, message=FALSE}
+library(truncnorm)
+library(dplyr)
+library(ggplot2)
+set.seed(1234)
+```
+## Objective 
+The goal of this exercise is to simulate and analyze data that might have arisen from a policy where eligibility was determined based on one observed measure.  Data from this type of setting are often consistent with the assumptions of the regression discontinuity designs we discussed in class.  
+
+## Setting
+This assignment simulates hypothetical data collected on women who gave birth at any one of several hospitals in disadvantaged neighborhoods in New York City in 2010. We are envisioning a government policy that makes available pre- and post-natal (through 2 years post-birth) health care for pregnant women, new mothers and their children.  This program is only available for women in households with income below $20,000 at the time they gave birth. The general question of interest is whether this program increases a measure of child health at age 3.  You will generate data for a sample of 1000 individuals.
+
+Clean regression discontinuity design.  For this assignment we will make the unrealistic assumption that everyone who is eligible for the program participates and no one participates who is not eligible.  
+
+#### Question 1. God role: simulate income.
+Simulate the "running variable" (sometimes referred to as the "running variable", "assignment variable", or "rating"), income, in units of thousands of dollars.  Call the variable "income". Try to create a distribution that mimics the key features of the data displayed in income_hist.pdf.  Plot your income variable in a histogram with 30 bins.
+
+```{r}
+pop_sz <-  1000
+peak_20_sz <- 60
+peak_0_sz <- 250
+
+I1 <- rtruncnorm(peak_0_sz, a = 0, b = 60, 2, 0.03)
+I2 <- rtruncnorm(pop_sz - peak_0_sz - peak_20_sz, a = 3, b = 60, 19, 9.6)
+I3 <- rtruncnorm(peak_20_sz, a = 3, b = 60, 19, 0.4)
+income <- c(I1,I2,I3)
+pl <- ggplot(data.frame(income=income), aes(x = income))
+pl + geom_histogram(aes(y = ..density..), 
+                   colour="black", fill="white", bins = 30)+xlim(0,60)+ylim(0,0.15)
+
+```
+
+#### Question 2. Policy maker role:  Assign eligibility indicator.
+Create an indicator for program eligibility for this sample.  Call this variable "eligible".
+```{r}
+eligible <- ifelse(income < 20, 1, 0)
+df <- data.frame(income, eligible)
+#head(df)
+```
+
+#### Question 3:  God role.
+For question 3 you will simulate a health measure what will serve as the outcome. You will simulate data from *two* possible worlds that vary with regard to the relationships between health (outcome) and income (running variable).
+
+## Question 3a
+(a) God role.  Simulate potential outcomes for World A.
+  i) Generate the potential outcomes for health assuming linear models for both E[Y(0) | X] and E[Y(1) | X].  This health measure should have a minimum possible score of 0 and maximum possible score of 30.  The *expected* treatment effect for everyone should be 4 (in other words, E[Y(1) - Y(0) | X] should be 4 at all levels of X).  The residual standard deviation of each  potential outcome should be *1*.
+```{r}
+df['Y_0'] <- 0 + 0.5*df['income'] +      rnorm(n = 1000, mean = 0, sd = 1)
+df['Y_1'] <- 0 + 0.5*df['income'] + 4 +  rnorm(n = 1000, mean = 0, sd = 1)
+
+#rescale: !! this wrecks the SATE, must truncate instead
+#df$Y_1 <- 30*(df$Y_1-min(df$Y_1))/(max(df$Y_1)-min(df$Y_1))
+#df$Y_0 <- 30*(df$Y_0-min(df$Y_0))/(max(df$Y_0)-min(df$Y_0))
+
+#truncate:
+df$Y_0[df$Y_0>30] <- 30
+df$Y_0[df$Y_0<0] <- 0
+df$Y_1[df$Y_1>30] <- 30
+df$Y_1[df$Y_1<0] <- 0
+
+ET_i <- df['Y_1']-df['Y_0']
+mean(ET_i[,1])
+
+```
+  ii) Save two datasets:  (1) fullA should have the running variable and both potential outcomes and (2) obsA should have the running variable, the eligibility variable, and the observed outcome.
+```{r}
+df['Y'] <- df$Y_0*(1-df$eligible) + df$Y_1*df$eligible
+fullA <- df %>% select(income, Y_1, Y_0)
+obsA <- df %>% select(income, eligible, Y)
+head(fullA)
+head(obsA)
+```
+
+## Question 3b 
+(b)  Simulate potential outcomes for World B.
+  i) Generate the potential outcomes for health assuming a linear model
+for E[Y(0) | X] and a quadratic model for E[Y(1) | X].  The treatment
+effect at the threshold (the level of X that determines eligibility) should be 4.  The residual standard deviation of each potential outcome should be *1*.  This health measure should have a minimum possible score of 0 and maximum possible score of 100. Creating this DGP may be facilitated by using a transformed version of your income variable that subtracts out the threshold value.
+  ii) Save two datasets:  (1) fullB should have the running variable and both potential outcomes and (2) obsB should have the running variable, the eligibility variable, and the observed outcome.
+```{r}
+inc_2 <- df$income-20
+a <- 0.0001/mean(inc_2**2)
+fullB_Y_0 <- 20 +              inc_2 +   + rnorm(n = 1000, mean = 0, sd = 1)
+fullB_Y_1 <- 20 + a*inc_2**2 + inc_2 + 4 + rnorm(n = 1000, mean = 0, sd = 1) 
+
+print(sprintf("min fullB_Y_0=%.2f, max fullB_Y_0=%.2f", min(fullB_Y_0), max(fullB_Y_0)))
+print(sprintf("min fullB_Y_1=%.2f, max fullB_Y_1=%.2f", min(fullB_Y_1), max(fullB_Y_1)))
+
+ET_i <- fullB_Y_1-fullB_Y_0
+mean(ET_i)
+```
+```{r}
+Y_B <- fullB_Y_0*(1-df$eligible) + fullB_Y_1*df$eligible
+fullB <- data.frame(income=income, Y_0 = fullB_Y_0, Y_1 = fullB_Y_1)
+obsB <- data.frame(income=df$income, eligible=df$eligible, Y=Y_B)
+head(fullB)
+head(obsB)
+```
+#### Question 4.  Researcher role. Plot your data!
+Make two scatter plots of income (x-axis) versus observed health (y-axis), one corresponding to each world.  In each, plot eligible participants in red and non-eligible participants in blue.
+```{r}
+obsA$eligible <- factor(obsA$eligible, levels = c(1,0))
+ggplot(obsA, aes(x=income, y=Y, color = eligible)) + 
+  geom_point() + ggtitle("Observations from World A")#+geom_smooth(method=lm)
+ 
+
+obsB$eligible <- factor(obsB$eligible, levels = c(1,0))
+ggplot(obsB, aes(x=income, y=Y, color = eligible)) + 
+  geom_point() + ggtitle("Observations from World B")#+geom_smooth(method=lm)
+
+plot(obsB$income[obsB$eligible==1], obsB$Y[obsB$eligible==1])
+points(obsB$income[obsB$eligible==0], obsB$Y[obsB$eligible==0]
+```
+#### Question 5.  Researcher role.  Estimate the treatment effect for World A and World B using all the data.
+Now we will estimate effects in a number of different ways.  Each model should include reported income and eligible as predictors.  In each case use the model fit to report the estimate of the effect of the program at the threshold level of income.  All models in Question 5 will be fit to all the data.
+
+## Question 5a: Researcher role.  Estimates for World A using all the data.
+(a) *Using all the data from World A,* perform the following analyses. 
+  (i) Fit a linear model.  Do not include an interaction.
+  (ii) Fit a linear model and include an interaction between income and eligible.
+  (iii) Fit a model that is quadratic in income and includes an interaction between both income terms and eligible (that is -- allow the shape of the relationship to vary between treatment and control groups.
+```{r}
+obsA$eligible <- 2-as.numeric(obsA$eligible)
+obsB$eligible <- 2-as.numeric(obsB$eligible)
+# If I don't do this, I get a coeff of eligible0 have the opposite sign of what it should be.
+# (because I had to convert this variable to a factor for ggplot previously)
+# R is unreasonable.
+```
+
+```{r}
+full_A_estimates <- c()
+lm_A_i <- lm(Y~income+eligible, data = obsA)
+#summary(lm_A_i)
+full_A_est_i <- summary(lm_A_i)$coefficients[3, 1]
+full_A_est_i
+
+lm_A_ii <- lm(Y~income*eligible, data = obsA)
+#summary(lm_A_ii)
+full_A_est_ii <- summary(lm_A_ii)$coefficients[3, 1] + 
+  20*summary(lm_A_ii)$coefficients[4, 1]
+full_A_est_ii
+
+lm_A_iii <- lm(Y~I(income**2)*eligible+income*eligible, data = obsA)
+#summary(lm_A_iii)
+full_A_est_iii <- summary(lm_A_iii)$coefficients[3, 1] + 
+  20*summary(lm_A_iii)$coefficients[6, 1] +
+  20**2*summary(lm_A_iii)$coefficients[5, 1]
+full_A_est_iii
+#cross-check:
+#prediction <- predict(lm_A_iii, r_is_dumb, type = "response")
+#prediction[[2]]-prediction[[1]]
+#yes,same.
+```
+## Question 5b: Researcher role.  Estimates for World B using all the data.
+(b) *Using all the data from World B,* perform the following analyses. 
+  (i) Fit a linear model.  Do not include an interaction.
+  (ii) Fit a linear model and include an interaction between income and eligible.
+  (iii) Fit a model that is quadratic in income and includes an interaction between both income terms and eligible (that is -- allow the shape of the relationship to vary between the treatment and control groups).
+```{r}
+lm_B_i <- lm(Y~income+eligible, data = obsB)
+full_B_est_i <- summary(lm_B_i)$coefficients[3, 1]
+full_B_est_i
+
+lm_B_ii <- lm(Y~income*eligible, data = obsB)
+full_B_est_ii <- summary(lm_B_ii)$coefficients[3, 1] + 20*summary(lm_B_ii)$coefficients[4, 1]
+full_B_est_ii
+
+lm_B_iii <- lm(Y~I(income**2)*eligible+income*eligible, data = obsB)
+full_B_est_iii <- summary(lm_B_iii)$coefficients[3, 1] + 20*summary(lm_B_iii)$coefficients[6, 1] +
+  20**2*summary(lm_B_iii)$coefficients[5, 1]
+full_B_est_iii
+```
+#### Question 6.  Researcher role.  Estimate the treatment effect for World A and World B using data close to the threshold.
+We will again estimate effects in a number of different ways.  Each model should include "income" and "eligible" as predictors.  In each case use the model fit to report the estimate of the effect of the program at the threshold level of income.  All models in Question 6 will be fit only to women with incomes ranging fro $18,000 to $22,000.
+
+## Question 6a: Researcher role.  Estimates for World A using the restricted data.
+(a) Using the restricted data (for participants with incomes between $18K and $22K) from World A, perform the following analyses. 
+  (i) Fit a linear model to the restricted dataset.  Do not include an interaction.
+  (ii) Fit a linear model to the restricted dataset, include an interaction between income and eligible.
+  (iii) Fit a model that is quadratic in income and includes an interaction between both income terms and eligible (that is -- allow the shape of the relationship to vary between the treatment and control groups).
+
+```{r}
+restricted_A <- obsA %>% filter(income>=18 & income<=22)
+
+lm_rA_i <- lm(Y~income+eligible, data = restricted_A)
+restricted_A_est_i <- summary(lm_rA_i)$coefficients[3, 1]
+restricted_A_est_i
+
+lm_rA_ii <- lm(Y~income*eligible, data = restricted_A)
+restricted_A_est_ii <- summary(lm_rA_ii)$coefficients[3, 1] + 20*summary(lm_rA_ii)$coefficients[4, 1]
+restricted_A_est_ii
+
+lm_rA_iii <- lm(Y~I(income**2)*eligible+income*eligible, data = restricted_A)
+restricted_A_est_iii <- summary(lm_rA_iii)$coefficients[3, 1] + 20*summary(lm_rA_iii)$coefficients[6, 1] +
+  20**2*summary(lm_rA_iii)$coefficients[5, 1]
+restricted_A_est_iii
+```
+
+## Question 6b: Researcher role.  Estimates for World B using the restricted data.
+(b) Using the restricted data (for participants with incomes between $18K and $22K) from World B, perform the following analyses.  
+  (i) Fit a linear model to the restricted dataset.  Do not include an interaction.
+  (ii) Fit a linear model to the restricted dataset, include an interaction between income and eligible.
+  (iii) Fit a model that is quadratic in income and includes an interaction between both income terms and eligible (that is -- allow the shape of the relationship to vary between treatment and control groups.
+```{r}
+restricted_B <- obsB %>% filter(income>=18 & income<=22)
+
+lm_rB_i <- lm(Y~income+eligible, data = restricted_B)
+restricted_B_est_i <- summary(lm_rB_i)$coefficients[3, 1]
+restricted_B_est_i
+
+lm_rB_ii <- lm(Y~income*eligible, data = restricted_B)
+restricted_B_est_ii <- summary(lm_rB_ii)$coefficients[3, 1] + 20*summary(lm_rB_ii)$coefficients[4, 1]
+restricted_B_est_ii
+
+lm_rB_iii <- lm(Y~I(income**2)*eligible+income*eligible, data = restricted_B)
+restricted_B_est_iii <- summary(lm_rB_iii)$coefficients[3, 1] + 20*summary(lm_rB_iii)$coefficients[6, 1] +
+  20**2*summary(lm_rB_iii)$coefficients[5, 1]
+restricted_B_est_iii
+```
+
+#### Question 7.  Researcher role.  Displaying your estimates.  
+Present your estimates from questions 5 and 6 into one or two tables or figures, clearly noting which world the data are from, which models the estimates are from, and which analysis sample was used.
+```{r}
+results <- data.frame("dataset"=c("full_A", "restricted_A", "full_B", "restricted_B"))
+results["i"] <- c(full_A_est_i, restricted_A_est_i, full_B_est_i, restricted_B_est_i)
+results["ii"] <- c(full_A_est_ii, restricted_A_est_ii, full_B_est_ii, restricted_B_est_ii)
+results["iii"] <- c(full_A_est_iii, restricted_A_est_iii, full_B_est_iii, restricted_B_est_iii)
+results
+```
+#### Question 8.  Researcher role.  Thinking about the data.
+ (a) A colleague now points out to you that some women may have incentives in these settings to misreport their actual income. Plot a histogram of reported income (using the default settings which should give you 33 bins) and look for anything that might support such a claim. What assumption is called into question if women are truly misreporting in this manner?
+```{r}
+pl + geom_histogram(aes(y = ..density..), 
+                   colour="black", fill="white", bins = 33)+xlim(0,60)+ylim(0,0.15)
+```
+@@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@   
+There is an unnatural artifact just below income=20, which is the threshold value for inclusion in the study.  
+Between the values of (5, 60) the distribution appears to conform to a normal, and the concentration   
+of participants around the $20,000 income mark is indeed suspicious. This picture is consistent with a hypothesis  
+that some participants whose income is to the right of the cutoff misreported income as if being close to  
+the maximal of the eligible values.
+
+Another artifact is the peak close to income = 0. Here is another possible explanation of both peaks:  
+those who wanted to musrepresent their income and *knew* what the cutoff value was reported income as just below   
+the cutoff. Those who did not know exactly where the cutoff was reported an income of zero to be safe.
+
+There is, however, a counter-explanation for the peak aroud income=0. In some societies the structure of welfare  
+is such that the benefits of receiving very small income are not large enough to outweigh the abrupt loss of   
+necessary welfare benefits that would occur the moment a person is no longer unemployed. This may explain the non-  
+adversarial, good-faith concentration of responses around zero.
+
+The assumption which would be threatened if it was indeed the case that there is misreporting is the assumption of *local (in a neighborhood of the cutoff) ignorability of the treatment assignment given the running variable*.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+ (b) Another colleague points out to you that several other government programs (including food stamps and Headstart) have the same income threshold for eligibility. How might this knowledge impact your interpretation of your results?
+   
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+This can be taken two ways: on one hand, other programs were probably designed by people who knwo what they are  
+doing, and the threshold may have been chosen in a way that truly captures some crucial underlying characteristics.  
+So this knowledge may be understood as support for $20,000 as a valid, well-chosen threshold.
+
+On the other hand, the fact that many crucial welfare benefits are only accessible to people whose income is below   
+this level may serve as more grounds for concerns which I outlined in my answer to the previosu question: reporting   
+an income which is not in great excess of $20,000 may constitute a huge loss of opportunities and resources (offered  
+by this *and many other programs*) for the people who depend on those, and not enough added income to attain the same level of welfare, thus creating an even stronger incentive to misreport. 
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+#### Question 9.  Researcher role.  Thinking about the assumptions?
+What are the three most important assumptions for the causal estimates in questions 5 and 6?
+
+have the same income threshold for eligibility. How might this knowledge impact your interpretation of your results?
+
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@    
+Apart form the aforementioned local ignorability, they are:  
+1) Locat SUTVA (no interference between units): potential outcomes for one woman cannot be affected by the eligibility  status of another woman. Values of the forcing variable leading to the same eligibility status (of which we have only  
+to: 0 and 1) cannot alter potential outcomes for any unit. This is how we get to consider Y_0=f(eligibility), instead  
+of Y_0=f(income). 
+2) Local constant treatment effect: there must indeed be a step discontinuity in a neghborhood of the cutoff.   
+For example, it's important not to mistake nonlinearity for discontinuity, whoch may happen if one wrognly asusmed a   linear model for potential outcomes.
+3) Eligibility must be continuous around the cutoff (signs of individuals manipulating their eligibility value suggest  
+a violation of this assumption). This implies that the units on either side of the cutoff must be identical on average, 
+except for the presence of treatment.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   
+
+#### Question 10.
+Provide a causal interpretation of your estimate in Question 6biii.
+
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+New mothers in our sample for whom the household income was requal to $20,000 andwho received the treatment,   
+their children's health outcomes measured after 3 years were on average 4.2 better than *had they not* received   
+treatment.
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+#### Question 11
+Use the rdrobust package in R to plot your data and choose an optimal bandwidth for the data in World B. 
+
+(a) First create two plots using the rdplot command.  In the first you use a linear model (that is, use p=1) and in the second allow for a quadratic term (that is, use p=2).  
+```{r}
+library(rdrobust)
+rdplot(obsB$Y, obsA$income, c = 20, p = 1, x.lim = c(0, 60), y.lim = c(0, 50))
+rdplot(obsB$Y, obsA$income, c = 20, p = 2, x.lim = c(0, 60), y.lim = c(0, 50)) #must try esmv
+```
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+In my case, there does not seem to be much of an adjustment between the two methods.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+(b) Now use the rdrobust command to fit an RDD models to your data.  Again try both a linear and a quadratic fit.  For the bandwidth selection method use "msetwo". [Use the conventional version of estimates.  Don't use the "bias corrected"" versions of things.] Compare the points estimates and bandwidths across these approaches. **Extra credit of four points in this question if you also run these commands with a different bandwidth selection method and compare the estimands and the bandwidth endpoints.**
+```{r}
+p1<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 1, bwselect = "msetwo")
+#conventional local-polynomial estimate to the left and to the right of the cutoff:
+p1$tau_cl
+p1$bws[1,]
+
+p2<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 2, bwselect = "msetwo")
+p2$tau_cl
+p2$bws[1,]
+```
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+Polynomial yielded larger bandwiths, and a greater difference between left and right.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+```{r}
+#if using same bandwith to the left as to the right of the cutoff:
+p1<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 1, bwselect = "mserd")
+p1$tau_cl
+p1$bws[1,]
+
+p2<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 2, bwselect = "mserd")
+p2$tau_cl
+p2$bws[1,]
+```
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+They got closer together when comapring first-order vs polynomial.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+```{r}
+#median(certwo,cerrd,cersum), for each side of the cutoff separately:
+p1<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 1, bwselect = "cercomb2")
+p1$tau_cl
+p1$bws[1,]
+
+p2<-rdrobust(obsB$Y, obsB$income, c = 20,  p = 2, bwselect = "cercomb2")
+p2$tau_cl
+p2$bws[1,]
+```
+@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@  
+Lowest values of all considered methods, close together for linear and a bit larger gap for quadratic.  
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  

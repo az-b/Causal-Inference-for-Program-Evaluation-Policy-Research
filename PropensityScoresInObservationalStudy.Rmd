@@ -1,0 +1,587 @@
+---
+title: "The role of propensity scores in observational study"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library('arm')
+library('dplyr')
+library(ggplot2)
+library(mgcv)
+library('formatR')
+```
+
+```{r, echo = F}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE)
+```
+
+## YOU MAY WORK IN PAIRS FOR THIS ASSIGNMENT ONLY ##
+
+## Objective
+This assignment will give you the opportunity to practice several different propensity score approaches to causal inference. In addition you will be asked to interpret the resulting output and discuss the assumptions necessary for causal inference. 
+
+## R Packages
+You will need to use an R package that you may not already have installed, arm.  
+
+## Problem Statement
+In this assignment will use data from a constructed observational study. The data and an associated data dictionary are available in this folder.
+
+The treatment group for the study that the data are drawn from is the group of children who participated in the IHDP intervention discussed in class. The research question of interest focuses on the effect of the IHDP intervention on age 3 IQ scores for the children that participated in it. The data for the comparison sample of children was pulled from the National Longitudinal Study of Youth during a similar period of time that the data were collected for the IHDP study.
+
+#### Question 1: Load the data and choose confounders (Step 1)
+Load the data (you can use the load command since the data are in a .Rdata file) and choose the covariates you want to use as confounders. To make life easier you many want to choose binary indicators of unordered categorical variables (rather than a variable labeled e.g. as 1, 2, 3 for different levels of a categorical variable). 
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+load(file = "ps.Rdata")
+head(hw4)
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+#sanity check:
+#hw4 %>% filter((bw > 2500)&(treat==1))
+#hw4 %>% filter((bw > 2500)&(bwg==0))
+#OK, as expected.
+
+#Curious about the domain of these dummies:
+unique(hw4$black | hw4$white | hw4$hispanic)
+#aha, so there is no 'other' race/ethnicity. Multicollinearity alert!!
+unique(hw4$lths | hw4$hs | hw4$ltcoll | hw4$college)
+#multicollineariy here as well, as suspected
+unique(hw4$st5 |	hw4$st9 |	hw4$st12 | hw4$st25 | hw4$st36 | hw4$st42 | hw4$st48 | hw4$st53 | hw4$st99)				
+#OK, so state 99 is not identical with any other states. We do have multicollinearity.
+```
+
+Create a new data frame for analysis that includes the outcome in the 1st column, the treatment indicator in the 2nd column, and the covariates in the remaining columns. Be thoughtful about your choices with respect to the nature of the covariates (e.g. is an unordered categorical being represented as such) and timing (don't control for post-treatment variables!). Provide your code and a list of the variable names for the confounder variables chosen.
+
+
+*********ANSWER:****************************************************  
+  
+TO EXCLUDE:::  
+Post-treatment covariates are:   
+-"dayskidh" -- number	of	days	child	was	in	the	hospital	after	being	born  
+-"income" -- family	income	one	year	after	the	child	was	born  
+  
+Redundancies/multicollinearity alerts:  
+- must exlcude one of the 'ethnicity/race' dummies  
+- better to exclude the categorical version and only keep the dummy version of:  
+"momed"  
+- must exclude one of the "momed" values. I do however wonder whether it makes more sense to group the values further into (possibly) more meaningful, broader groups, e.g.  a binary 'below_hs' variable. (I'll shelf this thought for now).  
+-"bw"	(child’s	birth	weight) vs "bwg"(indicator	for	whether	child	was	born low	birth	weight) -- not sure. may keep both.  
+  
+  
+TO INCLUDE:::  
+Possible confounders:  
+[It is difficult to reason about what factors could affect IQ performance, because I struggle to believe in construct validity of IQ. But let' s make an unreasonable asusmption that IQ scores stand for something..
+First pass: assert that SES affects likelihood of partaking in the study and getting treatment]  
+"momed" (or "lths"/"hs"/"ltcoll"/"college") --  Affects likelihood of being in the study (receiving treatment). Affects performance on standardized test.  
+"momage" -- Affects likelihood of receiving treatment. Affects performance on standardized test (at least to the extent to which it separates *extremely young* from *not extremely young*, e.g. via availability of time parents have to coach the child).  
+"b.marr" -- Affects likelihood of receiving treatment (insofar as marital status correlates with SES, given that the study offers economic gains to participants). Affects performance on standardized test (e.g. via availability of time parents have to coach the child).  
+"prenatal" -- is almost like another type of intervention affecting the same outcome. May have affected likelihood of receiving treatment (e.g. if prenatal care improves odds of being born within 'normal' weight range)  
+"sex" -- according to wikipedia, affects likelihood of being born premature  
+"first"	-- according to wikipedia, affects likelihood of being born premature  
+"bw" or "bwg" -- by definition affects likelihood of receiving treatment, likely affects outcomes too.  
+"preterm" -- by definition affects likelihood of receiving treatment, likely affects outcomes too.  
+"black"/"hispanic"/"white"	-- probably affect recruiting into the study. Probably affect outcome via SES. Must remember not to fall into multicollinearity trap.  
+"st5",	"st9",	"st12",	"st25",	"st36",	"st42",	"st48",	"st53"		-- very likely confounders, via access to study, access to education / schooling, and via SES.  
+"st99" -- same  
+"cig", "booze", "work.dur"	-- I don't see a clear reason for why these would be confounders, but my hunch is not a reliable criterion. Safer to assume they are confounders.   
+I will exclude only post-treatment vars from the confounders list.  
+********************************************************************  
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+#colnames <- colnames(hw4)
+#colnames_wo_treatment_and_outcome <- columns[columns %in% c("ppvtr.36","treat") == FALSE]
+confounders <- c("lths", "hs", "ltcoll", "momage", "b.marr", "prenatal", "sex", "first", "bw",  "bwg", "preterm", "black", "hispanic", "st5",	"st9",	"st12",	"st25",	"st36",	"st42",	"st48",	"st99", "cig", "booze", "work.dur")
+colnames_reordered <- c("ppvtr.36", "treat", confounders)
+
+df_selected_confounders <- hw4[ , colnames_reordered] 
+```
+
+*Also reduce that data frame to include only observations for children whose birthweight is less than 3000 grams.*
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+df_selected_confounders <- df_selected_confounders[df_selected_confounders$bw < 3000, ]
+head(df_selected_confounders)
+```
+
+#### Question 2: Estimate the propensity score (Step 2)
+Estimate the propensity score. That is, fit a propensity score model and save the predicted scores.
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)} 
+prop_logit <- glm (treat ~ ., data = df_selected_confounders[ , -1], family = binomial(link = "logit"))
+summary(prop_logit)
+propensity <- data.frame (score = predict(prop_logit, type = "response"), treat = prop_logit$model$treat)
+head(propensity)
+```
+#### Question 3: Restructure your data through matching. [Or at least create the weights variable that will let you to do so in the following steps]  (Step 3)
+
+(a) The first thing you need to be clear on before restructuring your data is the estimand. Given the description above about the research question, what is the estimand of interest?
+
+*************** ANSWER: **************  
+ATT!  
+**************************************  
+
+(b) First please perform *one-to-one nearest neighbor matching with replacement* using your estimated propensity score from Question 2. Perform this matching using the matching command in the arm package. The "cnts" variable in the output reflects the number of times each control observation was used as a match.
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+matches <- matching(df_selected_confounders$treat, score=propensity$score, replace=TRUE)
+weights <- matches$cnts
+weights <- data.frame (weights = weights, treat = prop_logit$model$treat)
+weights
+#unique(weights$weights)
+```
+
+#### Question 4: Check overlap and balance. (Step 4)
+
+(a) Examining Overlap. Check overlap on the raw data (that is that data before matching) using some diagnostic plots. Check overlap for the propensity scores as well as two other covariates. Note that it may be necessary to exclude some observations from the plots if they are being obscured in ways similar to the example discussed in class on 10/5.
+(b) Interpreting Overlap. What do these plots reveal about the overlap required to estimate our estimand of interest?  
+  
+*********************  
+(both (a) and (b) answered below)  
+*********************  
+```{r echo=FALSE, message=FALSE}
+#I'll need this:
+propensity$treat <- factor(propensity$treat, levels = c(1,0))
+R_is_not_cute <- propensity %>% group_by(treat) %>% summarise(mean=mean(score)) 
+df_selected_confounders$treat <- factor(df_selected_confounders$treat, levels = c(1,0))
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+# overlap on the propnesity scores:
+ggplot(propensity, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution") 
+```
+
+***************************  
+Let's zoom in on the smaller values of frequency counts:
+*************************** 
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+ggplot(propensity, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution (zoomed in, more bins)") + coord_cartesian(ylim=c(0,100))
+```
+***************  
+There *is* overlap in the distirbutions of propensity scores! (but there is great imbalance.)  
+This means that for every treated individual we observe some other individual who `looks like them' (if using matching with replacement) in terms of the propensity score, which is a lower-dimensional representation of all selected confounders.  
+***************   
+  
+***************    
+I chose to look at the two continuous variables among my selected ocnfounders: 'momage' and 'preterm':
+***************  
+```{r echo=FALSE, message=FALSE}
+R_is_not_cute <- df_selected_confounders %>% group_by(treat) %>% summarise(mean_momage=mean(momage), mean_preterm=mean(preterm)) 
+
+# (momage)
+ggplot(df_selected_confounders, aes(x = momage, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean_momage, color = treat), linetype="dashed") + ggtitle("'momage' distribution") 
+```
+***************
+The means of the two distributions are close together, but the domain of values of the *treated* does not fully overlap with the domain of the *control* -- some of the treated individuals have no one who `looks like them' in terms of this covariate. However, the overlap in propensity scores shown above lends me some hope that there will be overlap on 'this'momage' post-matching.
+
+
+***************
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+# (preterm)
+ggplot(df_selected_confounders, aes(x = preterm, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean_preterm, color = treat), linetype="dashed") + ggtitle("'preterm' distribution") 
+```
+***************  
+The domain of propensity score values of the *treated* does appear to overlap with the domain of the *control* -- for every treated person there is someone we observe in the control group who `looks like them'.  
+The means of the two distributions are not very close together.  
+***************  
+
+(c) Examining Balance. You will build your own function to check balance!  This function should take as inputs (at least) the data frame created in Question 1, the vector with the covariate names chosen in Question 1, and the weights created in Question 2. It should output the following:  
+
+1) Mean in the pre-match treatment group
+2) Mean in the pre-match control group
+3) Mean in the matched treatment group*
+4) Mean in the matched control group
+5) Pre-match mean difference (standardized for continuous variables, not standardized for binary variables)
+6) Matched mean difference (standardized for continuous variables, not standardized for binary variables)
+7) Ratio of standard deviations across pre-match groups (control/treated)
+8) Ratio of standard deviations across matched groups (control/treated)
+
+I will provide a "unit test" of this function in a few days so you can help ensure that you are doing the right thing.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+#first of all, because R and ggplot are a royal pain, I have to convert columns from factor back to numerics..
+df_selected_confounders$treat <- as.numeric(as.character(df_selected_confounders$treat))
+df_selected_confounders$st99 <- as.numeric(df_selected_confounders$st99)
+```
+  
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+check_balance <- function(confounders_df, confounders_list, weights){
+  
+  trt_grp <- confounders_df   %>% filter(treat==1) #%>% add_rownames()
+  ctrl_grp <- confounders_df   %>% filter(treat==0) #%>% add_rownames()
+  
+  trt_weights <- select(weights %>% filter(treat==1), weights)
+  ctrl_weights <- select(weights %>% filter(treat==0), weights)
+  
+  # means, weighted means:
+  trt_means <- sapply(confounders_list, function(x) mean(trt_grp[, x]))
+  ctrl_means <- sapply(confounders_list, function(x) mean(ctrl_grp[, x]))
+  w_means_trt <- sapply(confounders_list, function(x) sum(trt_weights*trt_grp[, x])/sum(trt_weights))
+  w_means_ctrl <- sapply(confounders_list, function(x) sum(ctrl_weights*ctrl_grp[, x])/sum(ctrl_weights))
+
+  # variances, weighted variances:
+  trt_variances <- sapply(confounders_list, function(x) var(trt_grp[, x]))
+  ctrl_variances <- sapply(confounders_list, function(x) var(ctrl_grp[, x]))
+  #test <- sapply(confounders_list, function(x) tryCatch({sum(trt_weights*(x - sum(trt_weights*trt_grp[, x])/sum(trt_weights))^2) / (sum(trt_weights) - 1)}, error=identity))
+  #vapply(test, is, logical(1), "error")
+  #print(trt_grp[,'lths'] - sum(trt_weights*trt_grp[,'lths'])/sum(trt_weights))
+  w_variances_trt <- sapply(confounders_list, function(x) sum(trt_weights * (trt_grp[, x] - sum(trt_weights*trt_grp[, x])/sum(trt_weights))^2) / (sum(trt_weights) - 1))
+  w_variances_ctrl <- sapply(confounders_list, function(x) sum(ctrl_weights * (ctrl_grp[, x] - sum(ctrl_weights*ctrl_grp[, x])/sum(ctrl_weights))^2) / (sum(ctrl_weights) - 1))
+
+  # mean differences, weighted mean differences:
+  #mean_diff <- ifelse(length(unique(x)<=2), trt_means - ctrl_means, (trt_means - ctrl_means)/sapply(covs, function(x) sd(treated[, x])))
+  binary_flag <- sapply(confounders_list, function(x) ifelse(length(unique(confounders_df[,x]))<=2, 1, 0))
+  #print(binary_flag)
+  mean_diff_asifnonbinary <- (trt_means - ctrl_means) / sqrt(trt_variances)
+  mean_diff_asifbinary <- trt_means - ctrl_means
+  mean_diff <- binary_flag*mean_diff_asifbinary + (1-binary_flag)*mean_diff_asifnonbinary
+  
+  w_mean_diff_asifnonbinary <- (w_means_trt - w_means_ctrl) / sqrt(w_variances_trt)
+  w_mean_diff_asifbinary <- w_means_trt - w_means_ctrl
+  w_mean_diff <- binary_flag*w_mean_diff_asifbinary + (1-binary_flag)*w_mean_diff_asifnonbinary
+  
+  # sd ratios:
+  sd_ratio <- sqrt(ctrl_variances)/sqrt(trt_variances)
+  w_sd_ratio <- sqrt(w_variances_ctrl)/sqrt(w_variances_trt)
+       
+      
+  output_df <- data.frame(trt_means, ctrl_means, w_means_trt, w_means_ctrl, mean_diff, w_mean_diff, sd_ratio, w_sd_ratio)
+  output_df <- round(output_df,3)
+  return(output_df)
+}
+
+```
+
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+balance_logit <- check_balance(df_selected_confounders, confounders, weights)
+balance_logit
+```
+(d) How do you interpret the resulting balance?  In particular what are your concerns with regard to covariates that are not well balanced (3-4 sentences at most).
+
+************* ANSWER: ***************  
+What we would like to see is reduced mean differences post-matching (compared to unmatched), as well as standard deviation ratios close to 1.  
+Large differences in means may bis the effect estimates. The following covariates appear to raise alarm with respect to mean difference (my rule of thumb: alarming if mean_diff increased substantially AND stands above 0.15):  
+hs  
+momage  
+sex  
+first  
+black  
+st48  
+work.dur  
+  
+It is encouraging that only few of the selected covariates did not improve in mean difference post-matching, and furthermore many of the covariates improved to (or orgiginally attained) a low mean difference.  
+  
+However, the following covariates are alarming based on their post-match sd ratios (especially alarming [*] if, say, |ratio-1|>0.5) :  
+lths  
+hs  
+ltcoll  
+momage*  
+prenatal*  
+sex  
+first  
+black  
+st5*  
+st.48  
+work.dur  
+cig  
+Imbalance in means between treatent and control groups is another potential source of bias in the effect estimates.  
+*************************************  
+
+(e) Show the results of your balance function on a simple example where the propensity score is fit using logistic regression on bw and b.marr and the matching is performed using 1-1 nearest neighbor matching with replacement.
+This is the unit test.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+covariates_test <- c('bw', 'b.marr')
+test_df <- df_selected_confounders[ , c('ppvtr.36', 'treat', covariates_test)]
+test_propensity <- predict(glm(treat ~ bw + b.marr, data = test_df, family = binomial(link = "logit"))) 
+test_matches <- matching(z = test_df$treat, score = test_propensity, replace = T)
+test_weights <- data.frame(treat = test_df$treat, weights = test_matches$cnts)
+
+check_balance(test_df, covariates_test, test_weights)
+
+```
+
+#### Question 5: Repeat steps 2-4 within the matching framework.
+It is rare that your first specification of the propensity score model or choice of matching method is the best. Try at least *3* new approaches. Try to achieve better balance!  For continuous variables strive for standardized mean differences less than .1.  Try to get ratios of standard deviation closer to 1 than they are for the pre-match data (it may be difficult for some covariates to get the ratio close to 1). For binary variables strive for difference in means (equivalently difference in percentages) less than .05.
+
+Ideas for trying something new in Step 2. You could try a new propensity score specification and then find the corresponding matched sample and calculate balance and overlap. For instance, you could change the inputs to the model (add quadratic terms, transformed versions of variables, or interactions, or delete predictors) or the model/algorithm used to estimate propensity scores (try probit or GAM or GBM or something else!). Alternately you could try a different matching method. A simple switch would be to switch from matching without replacement to matching with replacement. You could try k-1 matching or caliper matching or optimal matching though this will require using another package such as MatchIt. You could also try eliminating observations from the dataset. Importantly though if you eliminate observations from the group that we are trying to make inferences about you will need to profile those who have been removed. If you remove control observations from the comparison group (for instance those in states not represented by the IHDP observations) you do not need to do this. 
+
+Save your results (weights and balance) for reporting later.
+
+********* ANSWER: ********  
+First of all, I think it may be more meaningful to distinguish between (less than college) and (college or more) levels of mother's education.  
+I am also interested in closeness to critically low birth weight.   
+Same for momage.  
+**************************  
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+hw4$momed <- ifelse(hw4$momed > 3, 1, 0)
+#hw4$momed <- as.factor(hw4$momed)
+hw4$bw2 <- (hw4$bw - min(hw4$bw))^2
+hw4$momage <- (hw4$momage - min(hw4$momage))^2
+#str(hw4)
+```
+*********** ANSWER: **************  
+I will try removing cigarettes and booze, because I don't know how those was measured and therefore cannot convince myself that they are meaningful.  
+I will also omit all but 'resides in the state of the study' geographic locations, because the ocntribution of locales would be mostly via SES signal and proximity signal, but I don't know how to recode state dummies in terms of proximity, so they are hard to interpret. As for SES, other covariates carry that signal. I would rather reduce the number of covariates.  
+**********************************  
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+method2_confounders <- c("momage", "momed", "b.marr", "sex", "first", "bw", "bw2", "preterm", "black", "hispanic", "st99", "work.dur")
+colnames_reordered_method2 <- c("ppvtr.36", "treat", method2_confounders)
+df_selected_confounders_method2 <- hw4[ , colnames_reordered_method2] 
+df_selected_confounders_method2 <- df_selected_confounders_method2[df_selected_confounders_method2$bw < 3000, ]
+head(df_selected_confounders_method2)
+```
+
+*********** ANSWER: **************  
+I will furthermore entertain that:  
+- #momage, b.marr, SES-related covariates may interact. Momage must be considered together with its squre term, to 'smooth out' the effect of interactions for higher values.  
+- sex and birth weight in grams interact.  
+- first and preterm interact.   
+**********************************
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+prop_logit_model2 <- glm (treat ~ momage+as.factor(momed)+as.factor(b.marr)+as.factor(sex)+as.factor(first)+bw*as.factor(sex)+bw+bw2+preterm+preterm*as.factor(sex)+as.factor(black)+as.factor(hispanic) + as.factor(hispanic)*as.factor(st99)*as.factor(b.marr)+ as.factor(black)*as.factor(st99)*as.factor(b.marr)+as.factor(momed)*as.factor(work.dur) + as.factor(b.marr)*momage + momage^2, data = df_selected_confounders_method2[ , -1], family = binomial(link = "logit"))
+#summary(prop_logit_model2)
+propensity_model2 <- data.frame (score = predict(prop_logit_model2, type = "response"), treat = prop_logit_model2$model$treat)
+head(propensity_model2)
+
+matches_model2 <- matching(df_selected_confounders_method2$treat, score=propensity_model2$score, replace=TRUE)
+weights_model2 <- matches_model2$cnts
+weights_model2 <- data.frame (weights = weights_model2, treat = prop_logit_model2$model$treat)
+```
+
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+propensity_model2$treat <- factor(propensity_model2$treat, levels = c(1,0))
+R_is_not_cute <- propensity_model2 %>% group_by(treat) %>% summarise(mean=mean(score)) 
+df_selected_confounders_method2$treat <- factor(df_selected_confounders_method2$treat, levels = c(1,0))
+# overlap on the propnesity scores:
+ggplot(propensity_model2, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution") 
+#zoom:
+ggplot(propensity_model2, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution (zoomed in, more bins)") + coord_cartesian(ylim=c(0,100))
+
+balance_method2 <- check_balance(df_selected_confounders_method2, method2_confounders, weights_model2)
+#check_balance()
+balance_method2
+```
+****************************  
+Balance looks much better in this model (using fewer covariates, transforemd covariates, second-order terms), except for 'momage'..  Should I have considered a tranformation of momage that considers the upper bound on reproductive ability too? Not sure.  
+'momed' and 'preterm' also are not well balanced in terms of the second moment.  
+  
+  
+Let's try another model: probit matching *without* replacement. Let's also add a square term for 'preterm'  
+****************************  
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+prop_probit_model3 <- glm(treat ~ momage+as.factor(momed)+as.factor(b.marr)+as.factor(sex)+as.factor(first)+bw*as.factor(sex)+bw+bw2+preterm + preterm*as.factor(sex)+as.factor(black)+as.factor(hispanic) + as.factor(hispanic)*as.factor(st99)*as.factor(b.marr)+ as.factor(black)*as.factor(st99)*as.factor(b.marr)+as.factor(momed)*as.factor(work.dur) + as.factor(b.marr)*momage + momage^2, data = df_selected_confounders_method2[ , -1], family = binomial(link = "probit"))
+#summary(prop_probit_model3)
+
+propensity_model3 <- data.frame (score = predict(prop_probit_model3, type = "response"), treat = prop_probit_model3$model$treat)
+head(propensity_model3)
+
+df_selected_confounders_method2$treat <- as.numeric(as.character(df_selected_confounders_method2$treat))
+str(df_selected_confounders_method2)
+matches_model3 <- matching(df_selected_confounders_method2$treat, score=propensity_model3$score, replace=FALSE)
+
+wts <- ifelse(matches_model3$match.ind != 0, 1, 0)
+weights_model3 <- data.frame (weights = wts, matched = matches_model3$match.ind, treat = prop_probit_model3$model$treat)
+
+head(weights_model3)
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+propensity_model3$treat <- factor(propensity_model3$treat, levels = c(1,0))
+R_is_not_cute <- propensity_model3 %>% group_by(treat) %>% summarise(mean=mean(score)) 
+df_selected_confounders_method2$treat <- factor(df_selected_confounders_method2$treat, levels = c(1,0))
+# overlap on the propnesity scores:
+ggplot(propensity_model3, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution") 
+#zoom:
+ggplot(propensity_model3, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution (zoomed in, more bins)") + coord_cartesian(ylim=c(0,100))
+
+balance_method3 <- check_balance(df_selected_confounders_method2, method2_confounders, weights_model3)
+#check_balance()
+balance_method3
+```
+********** ANSWER: ***************  
+Probit model withour replacement is doing worse it seems, especially on the birth weight realted variables.  
+  
+  
+Finally, let's try GAM:  
+**********************************  
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+prop_gam_model<- gam(treat ~ momage+as.factor(momed)+as.factor(b.marr)+as.factor(sex)+as.factor(first)+bw*as.factor(sex)+bw+bw2+preterm + preterm*as.factor(sex)+as.factor(black)+as.factor(hispanic) + as.factor(hispanic)*as.factor(st99)*as.factor(b.marr)+ as.factor(black)*as.factor(st99)*as.factor(b.marr)+as.factor(momed)*as.factor(work.dur) + as.factor(b.marr)*momage + momage^2, data = df_selected_confounders_method2[ , -1], family = binomial(link = "probit"))
+#summary(prop_gam_model)
+
+propensity_gam <- data.frame (score = predict(prop_gam_model, type = "response"), treat = prop_gam_model$model$treat)
+df_selected_confounders_method2$treat<-as.numeric(as.character(df_selected_confounders_method2$treat))
+matches_gam <- matching(df_selected_confounders_method2$treat, score = propensity_gam$score, replace = T)
+
+weights_gam <- data.frame(treat = df_selected_confounders_method2$treat, weights = matches_gam$cnts)
+
+```
+
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+propensity_gam$treat <- factor(propensity_gam$treat, levels = c(1,0))
+R_is_not_cute <- propensity_gam %>% group_by(treat) %>% summarise(mean=mean(score)) 
+df_selected_confounders_method2$treat <- factor(df_selected_confounders_method2$treat, levels = c(1,0))
+# overlap on the propnesity scores:
+ggplot(propensity_gam, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity") + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution") 
+#zoom:
+ggplot(propensity_gam, aes(x = score, fill = treat)) +    
+  geom_histogram(alpha = 0.5, position = "identity", bins = 50) + geom_vline(data = R_is_not_cute, aes(xintercept=mean, color = treat), linetype="dashed") + ggtitle("Propensity score distribution (zoomed in, more bins)") + coord_cartesian(ylim=c(0,100))
+
+balance_gam <- check_balance(df_selected_confounders_method2, method2_confounders, weights_gam)
+#check_balance()
+balance_gam
+```
+
+
+#### Question 6: Repeat steps 2-4, but this time using IPTW.
+Save your results (weights and balance) -- do not display them here. Make sure that you use weights specific to the effect of the treatment on the treated. In this section simply include your code for estimating the pscores and your code for creating the IPTW weights.  
+
+```{r warning=FALSE}
+#I will keep working with the reduced set of confounders
+prop_model_for_iptw <- glm (treat ~ ., data = df_selected_confounders_method2[ , -1], family = binomial(link = "logit"))
+#summary(prop_model_for_fit)
+
+pscore_iptw <- prop_model_for_iptw$fitted.values
+
+wts_iptw <- pscore_iptw + (1- df_selected_confounders_method2$treat)*pscore_iptw/(1-pscore_iptw)
+weights_iptw <- data.frame (weights = wts, treat = prop_model_for_iptw$model$treat)
+
+balance_iptw <- check_balance(df_selected_confounders_method2, method2_confounders, weights_iptw)
+balance_iptw
+```
+
+#### Question 7: Comparative balance table
+Create a table with columns 6 and 8 from your function for each of the matching and weighting methods performed above. Which approach would you choose and why? (1-2 paragraphs at most)
+```{r echo=FALSE, message=FALSE}
+require(purrr)
+library(data.table)
+balance_logit<-setDT(balance_logit, keep.rownames = TRUE)[]
+balance_method2<-setDT(balance_method2, keep.rownames = TRUE)[]
+balance_method3<-setDT(balance_method3, keep.rownames = TRUE)[]
+balance_iptw<-setDT(balance_iptw, keep.rownames = TRUE)[]
+balance_gam<-setDT(balance_gam, keep.rownames = TRUE)[]
+balance_iptw <- balance_iptw %>% rename('var'='rn')
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+joined_12 <- merge(x = balance_logit[,c(1,7,9)], y = balance_method2[,c(1,7,9)], by = "rn", all = TRUE)
+joined_34 <- merge(x = balance_method3[,c(1,7,9)], y = balance_gam[,c(1,7,9)], by = "rn", all = TRUE)
+colnames(joined_12) <- c('var', 'lt.wmd', 'lt.wsdr', 'lt_t_2o.wmd', 'lt_t_2o.wsdr')
+colnames(joined_34) <- c('var', 'pt_woR_t_2o.wmd', 'pt_woR_t_2o.wsdr', 'gam.wmd', 'gam.wsdr')
+
+joined <- merge(x = joined_12, y = joined_34, , by = "var", all = TRUE)
+joined <- merge(x = joined, y = balance_iptw[,c(1,7,9)], , by = "var", all = TRUE)
+# a royal mess..
+joined <- joined  %>% rename('iptw.wmd'='w_mean_diff', 'iptw.wsdr'='w_sd_ratio')
+joined
+```
+*********ANSWER:***********
+Column name prefixes in the table above, explained:
+lt := original logistic regression propensity model for matching with replacement
+lt_t_2o := logistic regression model for matching with replacement. Fit to transformed covariates, some excluded, interaction and square terms added (as detailed above)
+pt_woR_t_2o := probit model for matching without replacement fit to the same data as above, same specification
+gam := gam model for matching with replacement fit to the same data as above, same specification
+iptw := iptw, fit to the same data as above, *full* specification
+***************************
+
+***************************
+Probit withour replacement and IPTW give some horrendous sd ratios, indicating potential bias in estimates. All models leave the researcher wanting when it comes to balance on the continuous variables. However, given that most of the covariates are not continuous, perhaps small post-match difference in means is a more meaningful metric for comparing methods.
+My second attempted model -- with fewer covarites, some transformed, and with second-order terms -- clearly dominates over the naive model both in sd ratios and in post-match reductions of mean differences, but gam seems to perform better on this metric than the second method, and for most covariates gam also dominates iptw.
+I would choose the gam model fit to transformed variables and including some interaction terms, as specified above.
+***************************
+
+#### Question 8: Estimate the treatment effect for the restructured datasets implied by Questions 4-6 (Step 5)
+Estimate the effect of the treatment on the treated for each of your five datasets by fitting a regression with weights equal to the number of times each observation appears in the matched sample (that is, use your weights variable from above) or using IPTW weights.
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+vanilla_summary <- summary(lm(ppvtr.36 ~ ., data=df_selected_confounders, weights=weights$weights))
+logit_wR <- c(vanilla_summary$coefficients[2, 1], vanilla_summary$coefficients[2, 2])
+
+second_order_summary <- summary(lm(ppvtr.36 ~ ., data=df_selected_confounders, weights=weights_model2$weights))
+second_order_wR <- c(second_order_summary$coefficients[2, 1], second_order_summary$coefficients[2, 2])
+
+probit_summary <- summary(lm(ppvtr.36 ~ ., data=df_selected_confounders, weights=weights_model3$weights))
+probit_woR <- c(probit_summary$coefficients[2, 1], probit_summary$coefficients[2, 2])
+
+gam_summary <- summary(lm(ppvtr.36 ~ ., data=df_selected_confounders, weights=weights_gam$weights))
+gam_wR <- c(gam_summary$coefficients[2, 1], gam_summary$coefficients[2, 2])
+
+iptw_summary <- summary(lm(ppvtr.36 ~ ., data=df_selected_confounders, weights=weights_iptw$weights))
+iptw <- c(iptw_summary$coefficients[2, 1], iptw_summary$coefficients[2, 2])
+
+together <- rbind(logit_wR, second_order_wR, probit_woR, gam_wR, iptw)
+colnames(together) <- c("effect estimate", "ste")
+together
+```
+
+#### Question 9: Assumptions
+What assumptions are necessary to interpret the estimates from the propensity score approaches causally?
+  
+*********ANSWER: ******************  
+1) Unconfoundedness/ignorability: propensity score matching aims to address confounding, but only works if we assume that all confounders are observed (a strong assumption) and included in the propensity score model.  
+2) SUTVA: no interference between treatment assignment of ondividuals. SUTVA also presupposes clearly defined, non-varying treatments.  
+3) Overlap: for each observation in the treatment group (in the case of estimating ATT!), there must exist a sufficiently similar / comparable observation from the control group. This amounts to requiring availability of counterfactuals.  
+4) Correctly chosen model specifications for computing propensity scores. In particular, accurate models will show good balance in resulting propensity scores distributions (first moments, second moments). Imbalance, as discussed above, can becone a source of bias in the effect estimates.  
+************************************  
+  
+#### Question 10: Causal Interpretation
+Provide a causal interpretation of *one* of your estimates above.  Remember to specify the counterfactual and to be clear about whom you are making inferences about.  Also make sure to use causal language.
+  
+*********ANSWER: ******************  
+Among participating children, receiving the help resulted in a 24 point increase in the IQ score as measured after 3 years.  
+************************************  
+
+#### Question 11: Comparison to linear regression 
+Fit a regression of your outomes to the treatment indicator and covariates.
+(a)  Report your estimate and standard error.
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=50)}
+linear <- lm(ppvtr.36 ~ ., df_selected_confounders)
+sum_lin <- summary(linear)
+effect_std <- c(sum_lin$coefficients[2, 1], sum_lin$coefficients[2, 2])
+print("effect estimate, std:")
+effect_std
+```
+(b)  Interpret your results non-causally.
+  
+*********ANSWER: ******************  
+In expectation, the participating/treatment cohort will get 10.64 higher IQ score results on average (measured after 3 years), compared to the expected score in the non-participating children.  
+************************************  
+
+(c)  Why might we prefer the results from the propensity score approach to the linear regression results in terms of identifying a causal effect?  
+  
+********ANSWER*********************  
+Confounders violate ignorability and overlap assumptions, make counterfactual comparisons technically impossible and counterfactual statements (causal statements!) ungrounded. Propensity score is a lower-dimensional summary of relevant covariates (possible confounders) that permits establishing a correspondence between observatioins in the group of interest and the comparison group, thus ensuring that counterfactuals are well-defined.  
+Linear regression is likely to introduce bias to the effect estimates when considering areas of the domain (of the group of interest) for which no counterfactual is present in the data. Moreover, linear regression is merely giving the best linear approximation of whatever is the (possibly nonlinear) correct model form for the data. Within the (non-parametric!) propensity score approach, however, there is greater flexibility in choosing a better model specification for fitting the scores, and there are metrics one can use to diagnose the appropriateness of the model choice (as we did above).  
+***********************************  
+#### Challenge Question: Improve the standard errors.
+We know the standard errors for the regression in question 11 aren't quite right because they are acting as if the observations are iid. Find a way to fit this regression that appropriate adjusts the standard errors for the weights used.
+```{r}
+wts <- 1/fitted(lm(abs(residuals(linear)) ~ ., data = df_selected_confounders))^2
+linear_adjusted <- lm(ppvtr.36 ~ ., data = df_selected_confounders, weights=wts)
+sum_lin_adjusted <- summary(linear_adjusted)
+
+
+effect_std <- c(sum_lin_adjusted$coefficients[2, 1], sum_lin_adjusted$coefficients[2, 2])
+print("effect estimate, std:")
+effect_std
+
+```
+

@@ -1,0 +1,334 @@
+---
+title: "Potential Outcomes Simulation"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output: pdf_document
+---
+
+```{r message = FALSE}
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+```
+
+## Objective
+
+In this exercise, you will be tasked with simulating an intervention study with a pre-determined average treatment effect. The goal is for you to understand the **potential outcome framework**, and the properties of **completely randomized experiments** through simulation. 
+
+### Problem Statement
+
+The goal is to simulate a data set with a treatment effect of $\tau$ = 5.
+
+The setting for our hypothetical study is Professor Hill's Causal Inference class. After the first attempt at Quiz I, Professor Hill decides to give students an opportunity to take the quiz again. Before the second attempt of the quiz, Professor Hill randomly assigns half the class to attend an extra tutoring session to half of the class. The other half of the class does not receive any additional help. Consider the half of the class that receives tutors as the treated group. The goal is to estimate the effect of the extra tutoring session on average test scores for the retake of Quiz 1.
+
+We are assuming that SUTVA is satisfied.
+
+#### Question 1: Generating potential outcomes; Calculating ATE (all seeing/omniscient)
+
+For this section, you are a god of Statistics.  That is, assume you are omniscient and know the potential outcome of $Y(0)$ and $Y(1)$ for everyone.
+
+(a) Please simulate a dataset consistent with the assumptions below while demonstrating an average treatment effect (ATE) of approximately **5**.
+
+#### Simulation assumptions
+
+The Data Generating Process (DGP) has the following features:                            
+* Population size N is 1000.                                            
+* The pretest (Causal Quiz I score) is independent and identically distributed with a Normal distribution with mean of 65 and standard deviation of 3.    
+
+* The potential outcomes for the corresponding to Causal Quiz II score should be linearly related to the pretest quiz score. In particular they should take the form:                                
+
+$$
+Y(0) = \beta_{0} + \beta_{1}X + 0  + \epsilon
+$$
+
+$$
+Y(1) = \beta_{0} + \beta_{1}X + \tau + \epsilon
+$$
+where $\beta_{0}$ is the intercept taking the value of **10**. $\beta_{1}$ is set to **1.1**. $\tau$ is 5. $\epsilon$ should be drawn from a N(0,1) distribution.  Please also set the seed at 1234 before generating these draws.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# data generating function
+
+gen_data <- function(pop_sz = 1000, b1 = 1.1, seed = 1234 ) {
+  
+   set.seed(seed)
+   
+   # Treatment (tutoring) assignment:
+   p_Z = 0.5 # fair coin
+   Z  <- rbinom(pop_sz, 1, p_Z) 
+   df <- data.frame(Z) #create df
+   
+   
+   # X (pre-tutoring Quiz I score) 
+   #!!!! NOTE TO GRADER: It would have been nice if it was directly stated that pretest is denoted 'X'. #
+   # Had to deduce this from the text further below.
+   df['X'] <- rnorm(pop_sz, mean = 65, sd=3)
+
+
+   tau <- 5
+   b0 <- 10
+   df['Y_0'] <- b0 + b1*df$X + 0 + rnorm(pop_sz, mean = 0, sd = 1)
+   df['Y_1'] <- b0 + b1*df$X + tau + rnorm(pop_sz, mean = 0, sd = 1)
+   
+   df['Y'] <- df['Y_0']*(1-df['Z']) + df['Y_1']*df['Z']
+   return(df)
+}
+
+```
+
+```{r}
+df<-gen_data(pop_sz = 1000)
+print(head(df))
+#checking the ATE:
+ET_i <- df['Y_1']-df['Y_0']
+mean(ET_i[,1])
+```
+
+(b) Write a function to generate the data generating process (DGP) for pretest, Y0, and Y1 with arguments for sample size, the coefficient on the pretest, and the random seed.  Then use this function to simulate a data set with sample size equal to *100*, seed equal to 1234, and the coefficient on the covariate set to 1.1.  The probability of being assigned to treatment should be equal to .5.
+
+```{r}
+df_100 <- gen_data(100, b1 = 1.1, seed = 1234)
+head(df_100)
+```
+#### Answer the following questions based on the DGP or using your simulated data set.  Remember that you are still all-seeing.
+
+(a) What is your interpretation of tau? 
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# People who re-take the quiz *without* tutoring get on average a 10% + 10 points increase 
+# in score the second time.
+# People who re-take the quiz *with* tutoring get on average a 10% + 15 points increase 
+# in score the second time.
+# So, the effect of the treatment is a bump to the regression intercept -- a flat rate 5 points 
+# (on average) bonus on top of the treatment-invariant increase of 10% + 10 points that would have
+# occurred anyway.
+```
+
+(b) How would you interpret the intercept in the DGP for $Y(0)$ and $Y(1)$? 
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# a 10 points (average) increase in the score that occurs when students re-take the test, regardless 
+# of whether they took a tutoring class
+```
+
+(c) Consider: How would you interpret the $\beta_{1}$ coefficient?
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# a variable 10% improvement in the score that occurs when students re-take the test, regardless 
+# of whether they took a tutoring class (before adding the intercept and accounting for variance)
+```
+
+#### Question 2: Calculating ATE (all seeing/omniscient)
+Answer this question using the simulated dataset from above.
+
+(a) The Sample Average Treatment Effect (SATE) is the average of individual treatment effects in the sample.  Calculate it for your sample.
+
+```{r}
+ET_i <- df_100['Y_1']-df_100['Y_0']
+SATE_true <- mean(ET_i[,1])
+SATE_true
+```
+
+#### Question 3: Estimating SATE (not all seeing/researchers'view)
+
+For Questions 3 and 4, you are a **mere** researcher!  Return your god-vision goggles and use only the data available to the researcher (that is, you will not have access to the counterfactual outcomes for each student).  
+
+(a) Using the same simulated dataset used in the previous case where $\tau$ = **5**, please randomly assign students to treatment and control groups (remember, this is something a research would do in practice). The probability of being assigned to treatment should be equal to .5. One way to do this is by using the following command to generate treatment assignment:
+
+```{r,echo=FALSE,eval=TRUE}
+# Randomly assign treatment status to each individual
+N=1000
+z <- rbinom(n=N, 1, p=.5)
+```
+Note that an alternative method is the following.... think about what difference this might make in practice...
+
+```{r,echo=FALSE,eval=TRUE}
+# Randomly assign treatment status to each individual
+n=1000
+ind <- rep(c(0,1),each=n/2) #Indicator for treatment and control 
+z <- sample(ind, n, replace = FALSE)
+```
+
+```{r}
+# the second way is guaranteed to produce equally sized groups, whereas the first one is not.
+```
+Next, create the observed data set which must include pretest scores, treatment assignment and observed Y. 
+
+```{r}
+df<-gen_data(pop_sz = 1000)
+print(head(df))
+```
+
+```{r}
+#by the way, is the treatment truly independent of Y(0) and of Y(1)?
+plot(density(df[df$Z==1,]$Y_1))
+lines(density(df[df$Z==0,]$Y_1))
+plot(density(df[df$Z==1,]$Y_0))
+lines(density(df[df$Z==0,]$Y_0))
+#YES
+```
+(b)  Estimate SATE using a difference in mean outcomes.
+```{r}
+SATE_difmeans <- mean(df[df$Z==1,]$Y)-mean(df[df$Z==0,]$Y)
+SATE_difmeans
+```
+(c)  Is this estimate close to the true SATE?  Divide the difference between SATE and estimated SATE by the standard deviation of the observed outcome, $Y$ to express this 
+conditional bias in standard deviation units. This helps you understand the practical significance of this difference.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+#the assignment so far did not ask us to compute true sate for the sample size 1000 (only for 100)...
+ET_i <- df['Y_1']-df['Y_0']
+SATE_true <- mean(ET_i[,1])
+print(sprintf('true SATE = %s', SATE_true))
+bias <- (SATE_true - SATE_difmeans)/sd(df$Y)
+print(sprintf('bias = %s', bias))
+```
+
+(d) Consider: Why is $\hat{SATE}$ different from SATE and $\tau$ ?
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# SATE_difmeans = E[ Y | Z=1] - E[ Y | Z=0] = 
+#               = E[ Y(1) | Z=1] - E[ Y(0) | Z=0] = 
+#               = E[ Y(1) - Y(0) | Z=1] + E[ Y(0) | Z=1] - E[ Y(0) | Z=0]
+# Take expectation of both sides. Get:
+# E(SATE_difmeans) = E[E[ Y(1) - Y(0) | Z=1]] + E[E[ Y(0) | Z=1]] - E[E[ Y(0) | Z=0]] = 
+#                  = E[Y(1) - Y(0)]           + E[Y(0)] -E[Y(0)] =
+#                  = E[Y(1) - Y(0)] =
+#                  =: SATE_true
+#hmmm.. Try again:
+# SATE_difmeans = E[ Y | Z=1] - E[ Y | Z=0] = 
+#               = E[ Y(1) | Z=1] - E[ Y(0) | Z=0] = 
+#               = E[ Y(1) - Y(0) | Z=1] + E[ Y(0) | Z=1] - E[ Y(0) | Z=0] = 
+#                                       [these two terms are selection bias]
+#               = 2(E[ Y(1) - Y(0) | Z=1])*1/2 + E[ Y(1) - Y(0) | Z=0]*1/2) - E[ Y(1) - Y(0) | Z=0] +
+#                                                          + E[ Y(0) | Z=1] - E[ Y(0) | Z=0] = 
+#               = 2E[ Y(1) - Y(0)] - E[ Y(1) - Y(0) | Z=0] + E[ Y(0) | Z=1] - E[ Y(0) | Z=0] = 
+#               = 2E[ Y(1) - Y(0)] - E[ Y(1) | Z=0] + E[ Y(0) |  Z=0] + E[ Y(0) | Z=1] - E[ Y(0) | Z=0] = 
+#               = 2E[ Y(1) - Y(0)] - E[ Y(1) | Z=0] + E[ Y(0) | Z=1] =
+#              =: 2SATE_true - E[ Y(1) | Z=0] + E[ Y(0) | Z=1].
+#The last two terms are the bias.
+  
+#Let's check this:
+print(2*SATE_true - mean(df[df$Z==0,]$Y_1) + mean(df[df$Z==1,]$Y_0))
+print(SATE_difmeans)
+#wow, I rule.
+
+
+```
+#### Question 3: Use Linear Regression to estimate the treatment effect 
+
+(a) Now we will use linear regression to estimate SATE for the observed data set created by Question 2. With this set up, we will begin to better understand some fundamental assumptions crucial for the later R homework assignments.
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# comments from JH: The linear regression is run on the Ys only. Y is regressed on Z and X.  
+ols <- glm(formula = Y ~ X + Z, data = df)
+effect <- summary(ols)$coefficients[3,1]
+summary(ols)
+print(sprintf("effect size = %s", effect))
+```
+
+(b) Consider: What is gained by using linear regression to estimate ATE instead of the mean difference estimation from above?
+
+[](## Answer: Linear regression can yield a more efficient estimate (i.e. one with a smaller standard error) when the pretreatment variables included are predictive of the outcome.)
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# I can see that the standard error here is 0.06470, but we didn't examine the standard error 
+# when using mean difference. 
+```
+**Challenge Question**: Treatment Effect Heterogenity
+
+(a) Based on the following function: Simulate the following "response surfaces" (relationship betwee the mean of each potential outcome and the covariate(s)"), $\text{E}[Y(0) \mid X]$ and $\text{E}[Y(1) \mid X]$.  Plot them on the same plot (that is make a plot with $X$ on the x-axis and $Y(0)$/$Y(1)$ on the y-axis.  Also simulate Y(0) and Y(1) (that is, the expected values plus "noise").
+
+Note: $X$ is the same pretest score used before.
+
+\begin{eqnarray*}
+\text{E}[Y(0) \mid X] &=& \beta^0_{0} + \beta^0_{1}X \\
+Y(0) &=& \text{E}[Y(0) \mid X]  + \epsilon^0 \\
+Y(0) &=& \beta^0_{0} + \beta^0_{1}X + \epsilon^0\\
+\text{E}[Y(1) \mid X] &=& \beta^1_{0} + \beta^1_{1}X \\
+Y(1) &=& \text{E}[Y(1) \mid X]  + \epsilon^1 \\
+Y(1) &=& \beta^1_{0} + \beta^1_{1}X  + \epsilon^1 \\
+\end{eqnarray*}
+
+where $\beta^0_{0}$ is set to **35**, $\beta^0_{1}$ is set to .6, $\beta^1_{0}$ is set to **15**, $\beta^1_{1}$ is set to 1. First generate a vector of predicted $Y(0)$ and $Y(1)$ (that is $\text{E}[Y(1) \mid X]$.  Then generate $Y(0)$ and $Y(1)$ with noise added as $\epsilon^0$ or $\epsilon^1$ from a distribution of N(0,1). Again, please also set seed at 1234. 
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+set.seed(1234)
+b0_0 <- 35
+b1_0 <- 0.6
+df2 <- df %>% select('Z', 'X')
+df2['E(Y_0|X)'] <- b0_0 + b1_0*df2$X
+df2['Y_0'] <- df2['E(Y_0|X)'] + rnorm(1000, 0, 1)
+
+b0_1 <- 15
+b1_1 <- 1
+df2['E(Y_1|X)'] <- b0_1 + b1_1*df2$X
+df2['Y_1'] <- df2['E(Y_1|X)'] + rnorm(1000, 0, 1)
+
+df2['Y'] <- df2['Y_0']*(1-df2['Z']) + df2['Y_1']*df2['Z']
+
+head(df2)
+df2 <- melt(data = df2, id.vars = c("Z", "X", 'E(Y_0|X)', 'E(Y_1|X)', 'Y'), measure.vars = c("Y_0", "Y_1"))
+colnames(df2)[6] <- "po_case"
+colnames(df2)[7] <- "po_value"
+head(df2)
+ggplot(df2, aes(x=X, y=po_value, color = po_case)) + 
+  geom_point()+
+  geom_smooth(method=lm)+ylab("Potential outcome value") #could have also just plotted 2 straight 
+# lines, each using any one row of E(Y_0|X) and E(Y_1|X), but that would be silly.
+```
+
+(b) Comment on your findings. In particular, note that there is no longer a tau included in the DGP.  Is there still a SATE?  Can we calculate SATE? (Remember I have to be omniscient to do this!) What is it?  Consider: How do we interpret the average treatment effect in this setting?
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+# I don't understand what the question is about. First of all, I did not understand why 
+# there was a tau  in the DGP to begin with. I thought tau is by definition ET_i, and to 
+# call that coefficient in one of the generating linear equations 'tau' was perhaps premature? 
+# It confused me originally and still does. Accordingly I don't understand the question: DGP 
+# doesn't have a variable named tau in it, and this whould mean we can't compute SATE? 
+# It seems like of course we can. I would propose that no element of the GDP equation be
+# called tau, and tau be reserved for the effect.
+
+ET_i <- df2[df2$po_case == 'Y_1',]$po_value - df2[df2$po_case == 'Y_0',]$po_value
+SATE_omni_df2 <-  mean(ET_i)
+SATE_omni_df2
+# re: how to interpret the ATE: same as always, just coming from a different DGP. 
+# I don't understand the question of "How do we interpret the average treatment effect". 
+# Isn't it always interpreted the same way? The *coefficient* can be interpret one way 
+# or another, but I thought the true, omniscient treatment effect is defined to have a 
+# particular meaning, and it's not up for interpretationon?
+# UPD: the exercise below clarified this for me.
+
+```
+
+
+(c) Is the treatment effect the same for all students?  If not, is there a pattern to the way it varies?  Consider: Why do we care about treatment effect heterogeneity?
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+df2['ET_i'] <- ET_i
+head(df2)
+
+plot(density(df2[df2$Z==1,]$ET_i))
+lines(density(df2[df2$Z==0,]$ET_i))
+
+ggplot(df2, aes(x=X, y=ET_i, color = Z)) + 
+  geom_point()+
+  geom_smooth(method=lm)+ylab("Treatment effect")
+
+# no, treatment effect is not the same for all students: it increases with X (original pretest score)
+# aha, we care because we want to interpret the causal efect as something that works 'on avergae', 
+# but individual study participants may be differentially affected (and some may even be hurt, 
+# although not in this model). 
+
+```
+
+(d) Now generate a similar plot from the initial DGP in Question 1 to reinforce the differences between a setting with constant treatment effect and a setting with heterogeneous treatment effects.
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+head(df)
+df <- melt(data = df, id.vars = c("Z", "X", 'Y'), measure.vars = c("Y_0", "Y_1"))
+colnames(df)[4] <- "po_case"
+colnames(df)[5] <- "po_value"
+head(df)
+ggplot(df, aes(x=X, y=po_value, color = po_case)) + 
+  geom_point()+
+  geom_smooth(method=lm)+ylab("Potential outcome value")
+
+# aha, the coefficients are the same. So the difference in potentials will have an average value 
+# that is indeendent of pre-treatment (X). 
+```

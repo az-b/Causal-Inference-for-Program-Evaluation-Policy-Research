@@ -1,0 +1,83 @@
+---
+title: "Fixed Effects Homework"
+author: "Jennifer Hill, Ray Lu & Zarni Htet"
+output: pdf_document
+---
+```{r echo=FALSE, message=FALSE}
+set.seed(1234)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+## Objective 
+The goal of this exercise is to simulate data that might be used to estimate a causal effects using a fixed effects regression.
+
+## Setting
+The hypothetical setting is similar to the twins study discussed briefly in class.  We are interested in estimating the effect of birthweight on future outcomes such as IQ.  However we are concerned that birthweight is correlated with other characteristics of the children that are also associated with IQ. In particular, here we suppose that the mother's IQ is the sole confounder when identifying the effect of birthweight on subsequent IQ.  
+
+#### Question 1. God role: simulate data.
+To explore what's going on here we want to simulate both the kind of data that the researchers for that study had available to them and the data that gods would have available.  
+
+Simulate data for 1000 observations (500 pairs of twins) for the following variables:  index for the mother (momindex), child birth weight in thousands of grams (W), child IQ at age 5 (Y), mother's IQ at time of birth (X). 
+
+The data should adhere to the following model
+  $$
+  X_k \sim N(100,15^2) \\
+  W_{ik} \mid X \sim N(3 + .02(X_{ik}-100), .5) \\
+  Y_{ik} | X_{ik}, W_{ik} \sim N(100 + .05(X_{ik}-100) + 0 W_{ik}, 5^2)
+  $$
+where k indexes mothers and i indexes children within mothers.  Thus X_{ik} represents the appropriate X_k value for the ith child born to the kth mother (this is the same for both children of the same mother).  
+```{r}
+k <- rep(1:500, each=2)
+i <- rep(c(1,2),10) 
+X_k <- rnorm(500, 100, 15)
+X_ik <- rep(X_k, each=2)
+W_ik <- rnorm(1000, 3 + 0.02*(X_ik-100), sqrt(0.5))
+Y_ik <- rnorm(1000, 100 + 0.05*(X_ik-100) + 0*W_ik, 5)
+
+df <- data.frame(k, i, X_ik, W_ik, Y_ik)
+head(df)
+```
+
+### Question 2:  God role
+  a) What is the effect of birthweight on IQ at age 5?
+  b) What role does X play in this scenario?
+   
+@@@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@@   
+By the DGP, birthweight has no effect on IQ at age 5.   
+X confounds the relationship between birthweight and the outcome.     
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+```{r}
+#summary(glm(Y_ik ~ W_ik, data=df))$coefficients
+#summary(glm(Y_ik ~ W_ik + X_ik, data=df))$coefficients
+```
+
+### Question 3: Researcher role
+The researcher only has available to her the mother ID, the birth weight of the child, and the IQ of the child at age 5.  Given this, what might a researcher do to estimate the effect of birth weight on child IQ?  Try two appropaches:
+ a) A regression of child IQ on birth weight.
+ b) A regression of child IQ on birth weight controlling for mom fixed effects.
+```{r}
+print("Y ~ W:")
+summary(glm(Y_ik ~ W_ik, data=df))$coefficients[2,]
+print("Y ~ W + k:")
+summary(glm(Y_ik ~ W_ik + factor(k), data=df))$coefficients[2,]
+```
+
+### Question 4: God role
+Comment on the difference between these estimates and the truth.   
+   
+@@@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@@   
+The first regression (Y~W) coefficient is heavily biased, which is to be expected, given that this model ignores the    mom-specific fixed effects via X_i. The second estimate is computed using information about mother-specific fixed effects, and it shows a much smaller bias and is reasonably close to the true value.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+
+### Question 5: Assumptions
+  a) How would you formalize the ignorability assumption required by the fixed effects strategy for identifying the causal effect?
+  b) Besides ignorability, what other assumptions are built into this fixed effects strategy?      
+@@@@@@@@@@@@@@@@@@@@@@ ANSWER @@@@@@@@@@@@@@@@@@@@@@@   
+@ a) Potential outcomes must be independent of the history of treatment conditional on the history of    
+covariates and the time-constant heterogeneity:   
+$Y(w) \perp W | X, U$   
+(where U is the time-invariant unit effect).   
+@ b) We must assume that linear model is appropriate for the data.   
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@  
+ 

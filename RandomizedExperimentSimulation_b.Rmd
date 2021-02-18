@@ -1,0 +1,372 @@
+---
+title: "Randomized Experiment Simulation"
+questions author: "Jenn1fer H1ll, Ray Lu & Zarn1 Htet" #obfuscated
+answers: "Margar1ta B0yarskaya" #obfuscated
+output: pdf_document
+---
+# Introduction 
+
+Randomized experiments are called the “gold standard” due to their ability to unbiasedly answer causal questions.  This is achieved by creating two (or more) groups that are identical to each other on average, in terms of the distribution of all (pre-treatment) variables. So, if each group receives a different treatment and the groups have different outcomes, we can safely attribute these differences due only to the systematic difference between groups: the treatment.
+
+In a randomized experiment, units are assigned to treatments using a known probabilistic rule. Each unit has nonzero probability of being allocated each treatment group. In class, we discussed two major types of randomized experiments that differ based on different assignment rules: **completely randomized assignment** and **randomized block assignment**.
+
+## Question 1
+
+Recall that in Assignment 2a we created a simulated dataset that could have manifested as a result of a completely randomized experiment. In that assignment, we asked about the difference between estimating the Sample Average Treatment Effect (SATE) by using the difference in means versus using linear regression with pretest score as a covariate.  However we only looked at one realized dataset so couldn't make more general comments about bias and efficiency of these estimators.  In this exercise, we will further explore these properties of these two different approaches to estimating our ATEs through simulation. For this question you will need to use the function dgp1.fun from assignment 2a.  
+
+```{r message = FALSE}
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+```
+
+```{r}
+dgp1.fun <- function(N,coef,seed){
+  set.seed(seed)
+  #Create pre-treatment test scores for everyone
+  pretest <- rnorm(n=N, mean = 65, sd = 3)
+  #Create potential outcome where tau = 5
+  y0 <- 10 + coef * pretest + 0 + rnorm(n = N, mean = 0, sd = 1)
+  y1 <- 10 + coef * pretest + 5 + rnorm(n = N, mean = 0, sd = 1)
+  dat<-data.frame(pretest=pretest,y0=y0,y1=y1)
+return(dat)
+}
+
+```
+
+(a) Start by drawing a sample of size 100 using this function, again setting the coefficient on the pretest to be 1.1 and the seed to be 1234.
+
+```{r}
+sample <- dgp1.fun(100, 1.1, 1234)
+#head(sample)
+```
+
+(b) We will now investigate the properties of two estimators of the SATE.
+
+* difference in means
+* linear regression estimate of the treatment effect using the pretest score as a covariate
+
+For now we will only consider the variability in estimates that would manifest as a result of the randomness in who is assigned to receive the treatment (this is sometimes referred to as "randomization based inference").  Since we are in Statistics God mode we can see how the observed outcomes and estimates would change across a distribution of possible treatment assignments.  We simulate this by repeatedly drawing a new vector of treatment assignments and then for each new dataset calculating estimates using our two estimators above.  We will use these estimates to create a "randomization distribution" (similar to a sampling distribution) for these two different estimators for the SATE. Obtain 10,000 draws from this distribution. [Hint: Note that the only thing that will be different in each new dataset is the treatment and observed outcome; the covariate values and potential outcomes will remain the same!]
+
+```{r}
+for (i in 1:10000){
+  sample[sprintf("Z_%d",i)] <- rbinom(100, 1, 0.5)
+}
+#head(sample)
+```
+
+(b) Plot the (Monte Carlo estimate of the) randomization distribution for each of the two estimators: difference in means and regression.  Either overlay the plots (with different colors for each) or make sure the xlim on both plots is the same.  Also add vertical lines (using different colors) for the SATE and the mean of the randomizaton distribution.
+```{r}
+sate_two_methods_dist <- function(sample){
+  difmeans <- c()
+  regression <- c()
+  for (i in 1:10000){
+    Z_i <- sprintf("Z_%d",i)
+    Y <- sample$y0*(1-sample[Z_i]) + sample$y1*(sample[Z_i])
+    colnames(Y) <- c('Y')
+    # dif means:
+    this_mean <- mean(Y[sample[Z_i]==1]) - mean(Y[sample[Z_i]==0])
+    difmeans <- c(difmeans, this_mean)
+    # regression:
+    I_hate_R <- data.frame(Y = Y[,1], pretest = sample$pretest, Z = sample[Z_i][,1])
+    head(I_hate_R)
+    ols <- glm(formula = Y ~ pretest + Z, data = I_hate_R)
+    this_effect <- summary(ols)$coefficients[3,1]
+    regression <- c(regression, this_effect)
+  }
+  r_is_dumb <- list("difmeans" = difmeans, "regression" = regression)
+  return(r_is_dumb)
+}
+
+```
+
+```{r}
+both <- sate_two_methods_dist(sample)
+difmeans <- both$difmeans
+regression <- both$regression
+df <- data.frame(regression, difmeans)
+df <- melt(data = df, measure.vars = c("regression", "difmeans"))
+head(df)
+ggplot(df, aes(x = value, fill = variable)) +            # Draw two histograms in same plot
+  geom_histogram(alpha = 0.5, position = "identity")
+```
+
+(c) Calculate the bias and efficiency of each of these two methods and compare them.
+```{r}
+#p1 <- ggplot(data, aes(x=variety, y=note, fill=treatment)) + 
+#    geom_boxplot() +
+#    facet_wrap(~treatment)
+
+ET_i <- sample['y1']-sample['y0']
+SATE_true <- mean(ET_i[,1]) 
+#regression:
+bias_reg <- mean(regression)-SATE_true
+variance_reg <- var(regression)
+print(sprintf("Bias, regression: %f", bias_reg))
+print(sprintf("Variance, regression: %f", variance_reg))
+#Difference in means:
+bias_difmeans <- mean(difmeans)-SATE_true
+variance_dm <- var(difmeans)
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+print(sprintf("Variance, difference in means: %f", variance_dm))
+
+# as expected the variance is smaller for regression.
+```
+
+(d) Re-run the simulation with a small coefficient (even 0) for the pretest covariate. Does the small coefficient lead to a different bias and efficiency estimate compared to when the coefficient for pretest was at **1.1** from before?
+```{r}
+sample2 <- dgp1.fun(100, 0.1, 1234)
+for (i in 1:10000){
+  sample2[sprintf("Z_%d",i)] <- rbinom(100, 1, 0.5)}
+both <- sate_two_methods_dist(sample2)
+difmeans <- both$difmeans
+regression <- both$regression
+
+ET_i <- sample2['y1']-sample2['y0']
+SATE_true <- mean(ET_i[,1]) 
+#regression:
+bias_reg <- mean(regression)-SATE_true
+variance_reg <- var(regression)
+print(sprintf("Bias, regression: %f", bias_reg))
+print(sprintf("Variance, regression: %f", variance_reg))
+#Difference in means:
+bias_difmeans <- mean(difmeans)-SATE_true
+variance_dm <- var(difmeans)
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+print(sprintf("Variance, difference in means: %f", variance_dm))
+
+
+#the bias and variance of regression didn't change, which seems like a nice thing, given that the 
+# coefficient of pretest is not the estimand of interest.
+#the difference in means, however, is sensitive to the change in this irrelevant quantity.
+```
+
+## Question 2
+
+In a randomized block design, randomization occurs separately within blocks. In many situations, the ratio of treatment to control observations is different across blocks. In addition, the treatment effect may vary across sites.  For this problem, you will simulate data sets for a randomized block design that includes a binary indicator for female as a blocking variable.  You will then estimate the ATE with two estimators: one that accounts for the blocking structure and one that does not.  You will compare the bias and efficiency of these estimators.  We will walk you through this in steps.
+
+(a) First simulate the blocking variable and potential outcomes for 100 observations.  In particular:  
+
+* Set the seed to by 1234
+* Generate female as blocking variable (Female vs. Other Ratio (30:70)
+* Generate Y(0) and Y(1) with the following features:
+ -- the intercept is 70 
+ -- the residual standard deviation is 1.  
+ -- treatment effect varies by block: observations with female=1 have treatment effect of 7 and those with female=0 have a treatment effect of 3.
+[Hint: Note that we are assuming that being female predicts treatment effect but does not predict the probability of being treated.]
+
+```{r}
+simulate_blockexp <- function( sz = 100,  p_fem = 3/7, seed = 1234){
+  
+  set.seed(seed)
+   
+  # Blocking var assignment:
+  Ff  <- rbinom(sz, 1, p_fem) 
+  df <- data.frame('F'=Ff)
+  
+  #Y_0, Y_1:
+  b0 = 70
+  df['Y_0'] <- b0 + 0                   + rnorm(sz, mean = 0, sd = 1)
+  df['Y_1'] <- b0 + 7*df$F + 3*(1-df$F) + rnorm(sz, mean = 0, sd = 1)
+  
+  return(df)
+  
+}
+blockexp <- simulate_blockexp()
+head(blockexp)
+```
+
+(b) Calculate the overall SATE and the SATE for each block
+```{r}
+ET_i <- blockexp['Y_1']-blockexp['Y_0']
+SATE_true <- mean(ET_i[,1])
+print(sprintf("overall SATE = %f",SATE_true))
+
+ET_i_F <- blockexp[blockexp$F==1,]['Y_1']-blockexp[blockexp$F==1,]['Y_0']
+SATE_F <- mean(ET_i_F[,1])
+print(sprintf("SATE (F) = %f",SATE_F))
+
+ET_i_nonF <- blockexp[blockexp$F==0,]['Y_1']-blockexp[blockexp$F==0,]['Y_0']
+SATE_nonF <- mean(ET_i_nonF[,1])
+print(sprintf("SATE (non-F) = %f",SATE_nonF))
+
+```
+
+Now create a function for assigning the treatment  In particular:
+* Within each block create different assignment probabilities:
+
+$$  
+\text{Pr}(Z=1 \mid \text{female}=0) = .6 \\
+\text{Pr}(Z=1 \mid \text{female}=1) = .4 
+$$
+
+Generate the treatment and create a vector for the observed outcomes implied by that treatment. 
+
+We will use this to create a randomization distribution for two different estimators for the SATE. Obtain 10,000 draws from that distribution.
+
+```{r}
+difmeans_blockexp <- c()
+regression_blockexp <- c()
+regression_blockexp_inter <- c() #I am also curious about block-specific effects
+regression_blockexp_inter_Z <- c()
+for(i in 1:10000){
+  # Treatment assignment:
+  p_Z_given_f = 0.6*(1-blockexp['F'])+0.4*blockexp['F']
+  ps <- as.vector(p_Z_given_f[, 'F'])
+  Z  <- rbinom(100, 1, ps)  
+  Y <- blockexp$Y_0*(1-Z) + blockexp$Y_1*(Z)
+  
+  # dif means:
+  this_mean <- mean(Y[Z==1]) - mean(Y[Z==0])
+  difmeans_blockexp <- c(difmeans_blockexp, this_mean)
+  # regression:
+  ols <- glm(formula = Y ~ blockexp[,'F'] + Z) #we could also add interactions F*Z
+  this_effect <- summary(ols)$coefficients[3,1]
+  regression_blockexp <- c(regression_blockexp, this_effect)
+  # to recover block-specific treatment effects. let's try separately:
+  ols_interactions <- glm(formula = Y ~ blockexp[,'F'] + Z + blockexp[,'F']*Z)
+  this_interaction_effect <- summary(ols_interactions)$coefficients[4,1]
+  this_interaction_Z_effect <- summary(ols_interactions)$coefficients[3,1]
+  this_inter_b0 <- summary(ols_interactions)$coefficients[1,1]
+  regression_blockexp_inter <- c(regression_blockexp_inter, this_interaction_effect)
+  regression_blockexp_inter_Z <- c(regression_blockexp_inter_Z, this_interaction_Z_effect)
+}
+```
+
+(c) Plot the (Monte Carlo estimate of the) randomization distribution for each of the two estimators: difference in means and regression.  (Note: Similar to Problem 1, the difference in means estimator will ignore blocks and the regression estimator will adjust for the blocks.) Either overlay the two plots (with different colors for each) or make sure the xlim on both plots is the same.
+
+```{r}
+df <- data.frame(regression = regression_blockexp, difmeans = difmeans_blockexp)
+df <- melt(data = df, measure.vars = c("regression", "difmeans"))
+head(df)
+ggplot(df, aes(x = value, fill = variable)) +            # Draw two histograms in same plot
+  geom_histogram(alpha = 0.5, position = "identity")
+
+```
+
+(d) Calculate the bias and efficiency of each estimator.  Also calculate the root mean squared error.
+
+```{r}
+ET_i <- blockexp['Y_1']-blockexp['Y_0']
+SATE_true <- mean(ET_i[,1]) 
+#regression:
+bias_reg <- mean(regression_blockexp)-SATE_true
+variance_reg <- var(regression_blockexp)
+rmse_reg <- sqrt(mean((SATE_true - regression_blockexp)^2))
+print(sprintf("Bias, block experiment regression: %f", bias_reg))
+print(sprintf("Variance, block experiment regression: %f", variance_reg))
+print(sprintf("RMSE, block experiment regression: %f", rmse_reg))
+#Difference in means:
+bias_difmeans <- mean(difmeans_blockexp)-SATE_true
+variance_dm <- var(difmeans_blockexp)
+rmse_dm <- sqrt(mean((SATE_true - difmeans_blockexp)^2))
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+print(sprintf("Variance, difference in means: %f", variance_dm))
+print(sprintf("RMSE, difference in means: %f", rmse_dm))
+print(sprintf("(Extra) mean coefficient on the interaction term: %f", mean(regression_blockexp_inter)))
+
+```
+(e) Why is the estimator that ignores blocks biased?  Is the efficiency meaningful here?  Why did I have you calculate the RMSE?
+```{r}
+# Bias occurs because individuals are not assigned to treatment/control groups with equal probability.
+
+# Efficiency is meaningful: the blocking factor accounts for variability between females and 
+# non-females, resulting in greater precision of the effect estimate. 
+
+# The rmse is a measure of the unexplained variation after the model has been fit to the data.
+
+# Since we did not include the Z*F interaction term in the model, the RMSE will be an estimate of 
+# the square-root of the block-by-treatment interaction.
+```
+
+(f)  Describe one possible real-life scenario where treatment assignment probabilities and/or treatment effects vary across levels of a covariate.
+```{r}
+#In the early days of the novel coronavirus pandemic, physicians were assigning experimental treatments 
+# (e.g. Tocilizumab) to patients with confirmed cases of covid-19. 
+# A quote describing the assignment rule: “At this point in time, we would consider dexamethasone as the
+# standard of care in mechanically ventilated patients but consider tocilizumab in nonresponders or when 
+# risks of steroid therapy for a particular patient outweigh the potential benefits” 
+# (https://www.healio.com/news/infectious-disease/20200720/tocilizumab-associated-with-lower-mortality-among-ventilated-patients-with-covid19)
+# Assignment probability was conditional on response to (and exposure to) the original treatment, and 
+# both were certainly conditional on the severity of the case, which is likely to be confounded by  
+# other covariates such as age and pre-existing conditions.
+```
+
+(g)  How could you use a regression to estimate the treatment effects separately by group?  Calculate estimates for our original sample and treatment assignment (with seed 1234).
+```{r}
+# I included the regressions with Female by Z interactions above out of curiosity. 
+print(sprintf("The effect for F=0 is: %f", mean(regression_blockexp_inter_Z)))
+print(sprintf("The effect for F=1 is: %f", mean(regression_blockexp_inter_Z+regression_blockexp_inter)))
+#they appear to be biased
+```
+
+### Challenge Question 1:
+
+(a)  We could have also evaluated the properties of the estimators above using sampling distributions that take into account uncertainty in all of the variables in the DGP.  Simulate sampling distributions (with 10,000 draws) for the DGP and associated estimators from Problem 1 of this assignment.
+```{r}
+# What size should th epopulation be? Confusing.
+
+pop <- dgp1.fun(13000, 1.1, 1234) #ok, I'll arbitrarily decide on the size of the pop.
+
+difmeans_sampling <- c()
+reg_sampling <- c()
+for(i in 1:10000){# 10000 draws
+  sample <- sample_n(pop, 100, replace = TRUE)
+  
+  #create treatment assignment:
+  sample["Z"] <- rbinom(100, 1, 0.5)
+  Y <- sample$y0*(1-Z) + sample$y1*(Z)
+  
+  # dif means:
+  this_mean <- mean(Y[Z==1]) - mean(Y[Z==0])
+  difmeans_sampling <- c(difmeans_sampling, this_mean)
+  # regression:
+  ols <- glm(formula = Y ~ sample$pretest + Z)
+  this_effect <- summary(ols)$coefficients[3,1]
+  reg_sampling <- c(reg_sampling, this_effect)
+}
+
+```
+
+(b) Create histograms of the sampling distributions just as you did above for the randomization distributions.  
+```{r}
+df <- data.frame(regression = reg_sampling, difmeans = difmeans_sampling)
+df <- melt(data = df, measure.vars = c("regression", "difmeans"))
+head(df)
+ggplot(df, aes(x = value, fill = variable)) +            
+  geom_histogram(alpha = 0.5, position = "identity")
+```
+(c) What is the difference between a sampling distribution and a randomization distribution?
+```{r}
+# Sampling distribution is the distribution of the values of the estimate computed on samples that 
+# are repeatedly drawn from a population.
+# Randomization distirbution is the distribution of the values of the estimate computed on the same 
+# sample, but using repeated different randomizations of treatment assignment. 
+# It appears that the randomization distirbution is more smooth, with better fit to the supposed 
+# theoretical values.
+```
+### Challenge Question 2:
+Redo everything above in comparison to PATE rather than SATE.  Does your preferred mode of inference depend at all on the estimand that you care most about?
+
+```{r}
+ET_i <- pop['y1']-pop['y0']
+SATE_true <- mean(ET_i[,1]) 
+#regression:
+bias_reg <- mean(reg_sampling)-SATE_true
+variance_reg <- var(reg_sampling)
+print(sprintf("Bias, regression: %f", bias_reg))
+print(sprintf("Variance, regression: %f", variance_reg))
+#Difference in means:
+bias_difmeans <- mean(difmeans_sampling)-SATE_true
+variance_dm <- var(difmeans_sampling)
+print(sprintf("Bias, difference in means: %f", bias_difmeans))
+print(sprintf("Variance, difference in means: %f", variance_dm))
+```
+
+```{r}
+# I got slightly higher bias AND variance for a regression estimator of PATE (vs. regression for SATE), 
+# but regression still seems to massively reduce uncertainty compared to a difference in means estimator 
+# (as it did for SATE and a randomization distribution), 
+# so I would go with regression regardless of whether I am aiming for SATE with randomization distribution
+# or PATE with sampling distirbution.
+```
